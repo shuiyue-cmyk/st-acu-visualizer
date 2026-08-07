@@ -982,13 +982,28 @@
         }
     };
 
+    // 缓存数据来源的原始引用：exportTableAsJson 返回 DB 内部 currentJsonTableData_ACU，
+    // DB 在数据合并时以不可变式替换整个对象（13 处 _set_currentJsonTableData_ACU 换新引用）。
+    // 引用相同 = 数据未变 → forceRefresh 时可跳过深拷贝直接复用缓存，避免高频全表 clone。
+    let lastRawTableRef = null;
+    // 标记最近一次 getTableData 是否产生了新数据（引用变化 → 需要重算 diffMap）
+    let lastTableDataRefreshed = false;
+
     const getTableData = (forceRefresh = false) => {
         if (!forceRefresh && cachedTableData) {
+            lastTableDataRefreshed = false;
             return cachedTableData;
         }
         try {
             const api = getCore().getDB();
             const raw = api && api.exportTableAsJson ? api.exportTableAsJson() : null;
+            // 引用未变且已有缓存 → 无需深拷贝，直接复用（数据没动，clone 纯属浪费）
+            if (forceRefresh && raw === lastRawTableRef && cachedTableData) {
+                lastTableDataRefreshed = false;
+                return cachedTableData;
+            }
+            lastRawTableRef = raw;
+            lastTableDataRefreshed = true;
             // 关键：exportTableAsJson 返回的是 DB 内部 currentJsonTableData_ACU 的直接引用，
             // 必须深拷贝后再对外返回，否则前端的就地修改会绕过 DB 的事务/校验逻辑。
             const data = cloneTableData(raw);
@@ -998,6 +1013,7 @@
             return data;
         } catch (e) {
             console.error('[ACU-UI] getTableData failed:', e);
+            lastTableDataRefreshed = false;
             return cachedTableData || null;
         }
     };
@@ -2048,7 +2064,12 @@ ${allTableNames.map(tName => {
                  });
             }
 
-            currentDiffMap = generateDiffMap(rawData);
+            // 优化D：diffMap 惰性重算——只有数据真正刷新（引用变化走深拷贝）才重算，
+            // 纯 UI 态变化（切 tab/折叠/设置调整 renderInterface(false)）复用现有 diffMap，
+            // 避免每次渲染都 O(rows×cols) 全表比对。
+            if (lastTableDataRefreshed) {
+                currentDiffMap = generateDiffMap(rawData);
+            }
             const savedOrder = getSavedTableOrder();
             let orderedNames = Object.keys(tables);
             if (savedOrder) orderedNames = savedOrder.filter(n => tables[n]).concat(orderedNames.filter(n => !savedOrder.includes(n)));
@@ -2499,38 +2520,46 @@ ${allTableNames.map(tName => {
             if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
         }
 
+        // 优化：去掉 subtree 监听，只观察 #chat 直接子级增删（新 .mes 是 #chat 直接子元素）。
+        // 原 subtree:true 会监听消息内部深层渲染（swipe/代码块展开等）触发大量无意义回调。
+        // 再加节流：批量增删时只处理最后一次，避免高频 jQuery 查找。
+        let obsRafPending = false;
+        const handleChatMutation = () => {
+            if (obsRafPending) return;
+            obsRafPending = true;
+            requestAnimationFrame(() => {
+                obsRafPending = false;
+                const currentConfig = getConfig();
+                const $chatNode = $('#chat');
+                const $wrapper = $('.acu-wrapper');
+                if (!$chatNode.length || !$wrapper.length) return;
+                if (currentConfig.frontendPosition === 'message') {
+                    const $lastMes = $chatNode.find('.mes').last();
+                    if ($lastMes.length) {
+                        const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
+                        if (!$targetBlock.find('.acu-wrapper').length) {
+                            $targetBlock.append($wrapper);
+                        } else if ($targetBlock.children().last()[0] !== $wrapper[0]) {
+                            $targetBlock.append($wrapper);
+                        }
+                    }
+                } else {
+                    const children = $chatNode.children();
+                    const lastChild = children.last()[0];
+                    if (lastChild && lastChild !== $wrapper[0]) {
+                        if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
+                            $chatNode.append($wrapper);
+                        }
+                    }
+                }
+            });
+        };
         if (observer) observer.disconnect();
-        observer = new MutationObserver((mutations) => {
-            const currentConfig = getConfig();
-            const $chatNode = $('#chat');
-            const $wrapper = $('.acu-wrapper');
-            
-            if (!$chatNode.length || !$wrapper.length) return;
+        observer = new MutationObserver(handleChatMutation);
 
-            if (currentConfig.frontendPosition === 'message') {
-                const $lastMes = $chatNode.find('.mes').last();
-                if ($lastMes.length) {
-                    const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
-                    if (!$targetBlock.find('.acu-wrapper').length) {
-                         $targetBlock.append($wrapper);
-                    }
-                    else if ($targetBlock.children().last()[0] !== $wrapper[0]) {
-                         $targetBlock.append($wrapper);
-                    }
-                }
-            } else {
-                const children = $chatNode.children();
-                const lastChild = children.last()[0];
-                if (lastChild && lastChild !== $wrapper[0]) {
-                    if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
-                        $chatNode.append($wrapper);
-                    }
-                }
-            }
-        });
-        
-        if ($chat.length) { 
-            observer.observe($chat[0], { childList: true, subtree: true }); 
+        if ($chat.length) {
+            // 只观察直接子级增删；消息内部渲染不再触发
+            observer.observe($chat[0], { childList: true });
         }
     };
 
@@ -3907,9 +3936,29 @@ const checkRowChanged = (realIdx, row) => {
         let fillPollStartedAt = 0;
         let fillPollLastFingerprint = null;
 
+        // 轻量指纹：只对每表的行数 + 行内单元格做滚动摘要，避免填表轮询期间
+        // 每 2s 对整份 currentJsonTableData_ACU 做 JSON.stringify（大表/高楼层时开销大）。
         const fingerprint = (data) => {
             if (!data || typeof data !== 'object') return '';
-            try { return JSON.stringify(data); } catch (_) { return String(Date.now()); }
+            try {
+                let out = '';
+                const sheets = Object.keys(data).filter(k => k.startsWith('sheet_'));
+                for (const k of sheets) {
+                    const s = data[k];
+                    if (!s || !Array.isArray(s.content)) { out += k + ':0;'; continue; }
+                    out += k + ':' + s.content.length + ';';
+                    // 摘要采样：前 8 行每行取前 4 个单元格，捕捉数据变化又不全量序列化
+                    const limit = Math.min(s.content.length, 8);
+                    for (let r = 0; r < limit; r++) {
+                        const row = s.content[r];
+                        if (!Array.isArray(row)) { out += 'r' + r + ':0;'; continue; }
+                        const cl = Math.min(row.length, 4);
+                        for (let cc = 0; cc < cl; cc++) out += (row[cc] ?? '') + '|';
+                        out += ';';
+                    }
+                }
+                return out;
+            } catch (_) { return String(Date.now()); }
         };
         const inEditingContext = () => {
             const jq = getCore().$;
@@ -3927,20 +3976,25 @@ const checkRowChanged = (realIdx, row) => {
                 if (inEditingContext()) return; // 用户编辑中不打扰
                 if (Date.now() - fillPollStartedAt > POLL_MAX_MS) { stopFillPoll(); return; }
                 if (!api || typeof api.exportTableAsJson !== 'function') { stopFillPoll(); return; }
-                let fresh = null;
-                try { fresh = cloneTableData(api.exportTableAsJson()); } catch (_) { fresh = null; }
-                const fp = fingerprint(fresh);
+                // 先取轻量指纹判断是否变化；只有变化才 clone 全表（避免每次都深拷贝）
+                let rawRef = null;
+                try { rawRef = api.exportTableAsJson(); } catch (_) { rawRef = null; }
+                const fp = fingerprint(rawRef);
                 if (fillPollLastFingerprint !== null && fp !== fillPollLastFingerprint) {
                     // 数据变了：填表仍在进行或有新写入 → 刷新并重置稳定计数
                     fillPollStable = 0;
-                    cachedTableData = fresh;
-                    renderInterface(true);
+                    let fresh = null;
+                    try { fresh = cloneTableData(rawRef); } catch (_) { fresh = null; }
+                    if (fresh) {
+                        cachedTableData = fresh;
+                        renderInterface(true);
+                    }
                 } else {
                     fillPollStable++;
                     if (fillPollStable >= POLL_STABLE_THRESHOLD) {
                         // 填表结束：把当前态存为新基线快照，让 diffMap 在下次刷新时不再把
                         // 已追平的行标记为"变化"高亮（否则会一直亮到下次填表或手动刷新）。
-                        if (fresh) saveSnapshot(fresh);
+                        try { if (rawRef) saveSnapshot(cloneTableData(rawRef)); } catch (_) {}
                         stopFillPoll();
                         return;
                     }
