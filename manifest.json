@@ -1,0 +1,12 @@
+{
+  "display_name": "数据库可视化前端",
+  "loading_order": 100,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "author": "Crino",
+  "version": "16.4.0",
+  "homePage": "https://github.com/shuiyue-cmyk/st-acu-visualizer",
+  "auto_update": true,
+  "minimum_client_version": "1.12.13"
+}
