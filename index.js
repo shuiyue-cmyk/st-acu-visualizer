@@ -32,6 +32,13 @@
     let isMultiSelectMode = false;
     let pendingDeletes = new Set();
 
+    // 追平完成检测轮询的模块级单例状态：防止连点多个 setInterval 并存、双 finishCatchup。
+    let catchupTimer = null;
+    let catchupStable = 0;
+    let catchupLastFp = null;
+    let catchupStartTs = 0;
+    let catchupFallbackTimer = null;
+
     let hideOptionsUntilUpdate = false;
     let lastOptionDataCheck = '';
 
@@ -955,9 +962,9 @@
         $('head').append(styles);
     };
 
-    // 轻量指纹：只对每表的行数 + 前 8 行×前 4 列做滚动摘要，用于轮询判断数据是否变化，
-    // 避免对整份 currentJsonTableData_ACU 做 JSON.stringify（大表/高楼层时开销大）。
-    // 顶层定义，供 init 的填表轮询与追平完成轮询共享。
+    // 轻量指纹：每表行数 + 步长采样（前 20 行内隔行取）+ 末行全列。
+    // 追平/填表主要写最新楼层（末行），也可能改更早楼层（中间行）；步长采样覆盖中间行变更，
+    // 又避免对整份数据 JSON.stringify（大表/高楼层开销大）。顶层定义，供两个轮询共享。
     const lightFingerprint = (data) => {
         if (!data || typeof data !== 'object') return '';
         try {
@@ -965,19 +972,38 @@
             const sheets = Object.keys(data).filter(k => k.startsWith('sheet_'));
             for (const k of sheets) {
                 const s = data[k];
-                if (!s || !Array.isArray(s.content)) { out += k + ':0;'; continue; }
+                if (!s || !Array.isArray(s.content) || s.content.length === 0) { out += k + ':0;'; continue; }
                 out += k + ':' + s.content.length + ';';
-                const limit = Math.min(s.content.length, 8);
-                for (let r = 0; r < limit; r++) {
+                // 隔行采样前 20 行（步长 2）每行前 6 列，再加末行前 6 列。
+                // 行数变化已由长度部分捕获。
+                const ROWS_SCAN = 20, COLS_SCAN = 6;
+                const n = s.content.length;
+                const rowLimit = Math.min(n, ROWS_SCAN);
+                for (let r = 0; r < rowLimit; r += 2) {
                     const row = s.content[r];
-                    if (!Array.isArray(row)) { out += 'r' + r + ':0;'; continue; }
-                    const cl = Math.min(row.length, 4);
-                    for (let cc = 0; cc < cl; cc++) out += (row[cc] ?? '') + '|';
+                    if (Array.isArray(row)) {
+                        const cl = Math.min(row.length, COLS_SCAN);
+                        for (let cc = 0; cc < cl; cc++) out += (row[cc] ?? '') + '|';
+                    }
                     out += ';';
                 }
+                // 末行全列（补最新楼层写入；若末行在前 20 行内已采，此处重复但确定性一致）
+                const last = s.content[n - 1];
+                if (Array.isArray(last)) {
+                    const cl = Math.min(last.length, COLS_SCAN);
+                    for (let cc = 0; cc < cl; cc++) out += (last[cc] ?? '') + '|';
+                }
+                out += ';';
             }
             return out;
         } catch (_) { return String(Date.now()); }
+    };
+
+    // 是否处于用户编辑/弹窗上下文：排序模式、设置弹窗、单元格编辑、cell menu、快速预览任一打开即 true。
+    // 顶层定义，供 init 的填表轮询与 bindEvents 的追平轮询共用（两者是兄弟 IIFE 闭包）。
+    const inEditingContext = () => {
+        const jq = getCore().$;
+        return isEditingOrder || !!(jq && (jq('.acu-edit-overlay, .acu-cell-menu, .acu-quick-view-overlay').length));
     };
 
     // 深拷贝工具：避免对外暴露数据库内部对象的引用，防止前端就地修改污染 DB 运行时状态。
@@ -3302,30 +3328,43 @@ const checkRowChanged = (realIdx, row) => {
                 // 追平（runManualCatchUp）成功**不触发** _notifyTableUpdate / _notifyTableFillStart，
                 // 前端拿不到任何刷新信号 → 选项表/表格停在旧数据。这里启动追平完成检测轮询：
                 // 每 1.5s 轻量指纹比对 DB 数据，连续 3 次稳定判定追平结束，随后强制重拉+重渲染。
+                // 注意：timer/状态必须是模块级单例，防止连点多个 setInterval 并存导致双 finishCatchup。
                 const CATCHUP_POLL_MS = 1500;
                 const CATCHUP_STABLE_N = 3;
                 const CATCHUP_MAX_MS = 10 * 60 * 1000; // 10 分钟硬上限
-                let catchupTimer = null;
-                let catchupStable = 0;
-                let catchupLastFp = null;
-                const catchupStartTs = Date.now();
                 const apiDB = core.getDB();
-                const stopCatchupPoll = () => { if (catchupTimer) { clearInterval(catchupTimer); catchupTimer = null; } };
+                const stopCatchupPoll = () => {
+                    if (catchupTimer) { clearInterval(catchupTimer); catchupTimer = null; }
+                    if (catchupFallbackTimer) { clearTimeout(catchupFallbackTimer); catchupFallbackTimer = null; }
+                    catchupLastFp = null;
+                };
                 const finishCatchup = (saved) => {
+                    if (!catchupTimer) return; // 已结束（幂等守卫）
                     stopCatchupPoll();
                     // 追平结束：清缓存 + 强制重拉 + 重渲染（含选项表），并把当前态存为新基线
                     cachedTableData = null;
                     lastRawTableRef = null;
                     currentDiffMap.clear();
                     try { const d = getTableData(true); if (d) saveSnapshot(d); } catch (_) {}
-                    renderInterface(true);
+                    try { renderInterface(true); } catch (_) {}
                     if (window.toastr) window.toastr.success(saved ? '追平完成，数据已刷新。' : '追平结束，数据已刷新。', { timeOut: 2500 });
                 };
+                // 连点保护：新点击先停掉旧轮询
+                stopCatchupPoll();
+                catchupStable = 0;
+                catchupStartTs = Date.now();
+                // 首 tick 前先同步采样基线，避免把"追平刚开始还没写"误判为稳定
+                try {
+                    if (apiDB && typeof apiDB.exportTableAsJson === 'function') {
+                        catchupLastFp = lightFingerprint(apiDB.exportTableAsJson());
+                    }
+                } catch (_) { /* 采样失败，下一 tick 补基线 */ }
                 catchupTimer = setInterval(() => {
                     try {
+                        if (Date.now() - catchupStartTs > CATCHUP_MAX_MS) { finishCatchup(false); return; }
+                        if (inEditingContext()) return; // 用户编辑/弹窗打开中不打扰
                         if (!apiDB || typeof apiDB.exportTableAsJson !== 'function') { stopCatchupPoll(); return; }
-                        const rawRef = apiDB.exportTableAsJson();
-                        const fp = lightFingerprint(rawRef);
+                        const fp = lightFingerprint(apiDB.exportTableAsJson());
                         if (catchupLastFp !== null && fp !== catchupLastFp) {
                             catchupStable = 0; // 数据还在变：追平进行中
                         } else {
@@ -3333,11 +3372,12 @@ const checkRowChanged = (realIdx, row) => {
                             if (catchupStable >= CATCHUP_STABLE_N) { finishCatchup(true); return; }
                         }
                         catchupLastFp = fp;
-                        if (Date.now() - catchupStartTs > CATCHUP_MAX_MS) { finishCatchup(false); }
                     } catch (_) { /* 轮询一次异常忽略，继续 */ }
                 }, CATCHUP_POLL_MS);
-                // 兜底：若 10 分钟没到（被 stop 或异常），确保不悬挂
-                setTimeout(() => { if (catchupTimer) { finishCatchup(false); } }, CATCHUP_MAX_MS + 2000);
+                // 兜底：若 10 分钟没到（被 stop 或异常），确保不悬挂。
+                // 单例 timer：新点击先 stop（clearTimeout），旧兜底不会误终止新轮询。
+                if (catchupFallbackTimer) clearTimeout(catchupFallbackTimer);
+                catchupFallbackTimer = setTimeout(() => { finishCatchup(false); }, CATCHUP_MAX_MS + 2000);
             } else {
                 if (window.toastr) window.toastr.warning('未找到追平按钮，请在「填表工作台」页手动点击「一键追平所选表未填楼层」。', { timeOut: 3500 });
             }
@@ -4000,11 +4040,7 @@ const checkRowChanged = (realIdx, row) => {
         let fillPollStartedAt = 0;
         let fillPollLastFingerprint = null;
 
-        // 轻量指纹复用顶层 lightFingerprint（见 IIFE 顶层定义），避免重复定义。
-        const inEditingContext = () => {
-            const jq = getCore().$;
-            return isEditingOrder || !!(jq && (jq('.acu-edit-overlay, .acu-cell-menu, .acu-quick-view-overlay').length));
-        };
+        // 轻量指纹/inEditingContext 复用顶层定义（见 IIFE 顶层），避免兄弟闭包重复定义。
         const stopFillPoll = () => { if (fillPollTimer) { clearInterval(fillPollTimer); fillPollTimer = null; } };
 
         const startFillPoll = () => {
@@ -4013,6 +4049,12 @@ const checkRowChanged = (realIdx, row) => {
             fillPollStartedAt = Date.now();
             fillPollLastFingerprint = null;
             const api = getCore().getDB();
+            // 首 tick 前先同步采样基线，避免把"填表刚开始还没写"误判为稳定而提前结束
+            try {
+                if (api && typeof api.exportTableAsJson === 'function') {
+                    fillPollLastFingerprint = lightFingerprint(api.exportTableAsJson());
+                }
+            } catch (_) { /* 采样失败，下一 tick 补基线 */ }
             fillPollTimer = setInterval(() => {
                 if (inEditingContext()) return; // 用户编辑中不打扰
                 if (Date.now() - fillPollStartedAt > POLL_MAX_MS) { stopFillPoll(); return; }
