@@ -5,7 +5,7 @@
   "optional": [],
   "js": "index.js",
   "author": "Crino",
-  "version": "16.5.0",
+  "version": "16.5.1",
   "homePage": "https://github.com/shuiyue-cmyk/st-acu-visualizer",
   "auto_update": true,
   "minimum_client_version": "1.12.13"

@@ -955,6 +955,31 @@
         $('head').append(styles);
     };
 
+    // 轻量指纹：只对每表的行数 + 前 8 行×前 4 列做滚动摘要，用于轮询判断数据是否变化，
+    // 避免对整份 currentJsonTableData_ACU 做 JSON.stringify（大表/高楼层时开销大）。
+    // 顶层定义，供 init 的填表轮询与追平完成轮询共享。
+    const lightFingerprint = (data) => {
+        if (!data || typeof data !== 'object') return '';
+        try {
+            let out = '';
+            const sheets = Object.keys(data).filter(k => k.startsWith('sheet_'));
+            for (const k of sheets) {
+                const s = data[k];
+                if (!s || !Array.isArray(s.content)) { out += k + ':0;'; continue; }
+                out += k + ':' + s.content.length + ';';
+                const limit = Math.min(s.content.length, 8);
+                for (let r = 0; r < limit; r++) {
+                    const row = s.content[r];
+                    if (!Array.isArray(row)) { out += 'r' + r + ':0;'; continue; }
+                    const cl = Math.min(row.length, 4);
+                    for (let cc = 0; cc < cl; cc++) out += (row[cc] ?? '') + '|';
+                    out += ';';
+                }
+            }
+            return out;
+        } catch (_) { return String(Date.now()); }
+    };
+
     // 深拷贝工具：避免对外暴露数据库内部对象的引用，防止前端就地修改污染 DB 运行时状态。
     // 高楼层大数据时 structuredClone/JSON 都可能抛错，必须有最终兜底，不能让调用方被异常打断。
     const cloneTableData = (data) => {
@@ -3274,6 +3299,45 @@ const checkRowChanged = (realIdx, row) => {
             const okCatch = await waitAndClick((rt) => findButtonByExactText(rt, ['一键追平所选表未填楼层'], ['执行手动填表']), 30, true);
             if (okCatch) {
                 if (window.toastr) window.toastr.info('已在数据库工作台静默全选并触发追平。', { timeOut: 2500 });
+                // 追平（runManualCatchUp）成功**不触发** _notifyTableUpdate / _notifyTableFillStart，
+                // 前端拿不到任何刷新信号 → 选项表/表格停在旧数据。这里启动追平完成检测轮询：
+                // 每 1.5s 轻量指纹比对 DB 数据，连续 3 次稳定判定追平结束，随后强制重拉+重渲染。
+                const CATCHUP_POLL_MS = 1500;
+                const CATCHUP_STABLE_N = 3;
+                const CATCHUP_MAX_MS = 10 * 60 * 1000; // 10 分钟硬上限
+                let catchupTimer = null;
+                let catchupStable = 0;
+                let catchupLastFp = null;
+                const catchupStartTs = Date.now();
+                const apiDB = core.getDB();
+                const stopCatchupPoll = () => { if (catchupTimer) { clearInterval(catchupTimer); catchupTimer = null; } };
+                const finishCatchup = (saved) => {
+                    stopCatchupPoll();
+                    // 追平结束：清缓存 + 强制重拉 + 重渲染（含选项表），并把当前态存为新基线
+                    cachedTableData = null;
+                    lastRawTableRef = null;
+                    currentDiffMap.clear();
+                    try { const d = getTableData(true); if (d) saveSnapshot(d); } catch (_) {}
+                    renderInterface(true);
+                    if (window.toastr) window.toastr.success(saved ? '追平完成，数据已刷新。' : '追平结束，数据已刷新。', { timeOut: 2500 });
+                };
+                catchupTimer = setInterval(() => {
+                    try {
+                        if (!apiDB || typeof apiDB.exportTableAsJson !== 'function') { stopCatchupPoll(); return; }
+                        const rawRef = apiDB.exportTableAsJson();
+                        const fp = lightFingerprint(rawRef);
+                        if (catchupLastFp !== null && fp !== catchupLastFp) {
+                            catchupStable = 0; // 数据还在变：追平进行中
+                        } else {
+                            catchupStable++;
+                            if (catchupStable >= CATCHUP_STABLE_N) { finishCatchup(true); return; }
+                        }
+                        catchupLastFp = fp;
+                        if (Date.now() - catchupStartTs > CATCHUP_MAX_MS) { finishCatchup(false); }
+                    } catch (_) { /* 轮询一次异常忽略，继续 */ }
+                }, CATCHUP_POLL_MS);
+                // 兜底：若 10 分钟没到（被 stop 或异常），确保不悬挂
+                setTimeout(() => { if (catchupTimer) { finishCatchup(false); } }, CATCHUP_MAX_MS + 2000);
             } else {
                 if (window.toastr) window.toastr.warning('未找到追平按钮，请在「填表工作台」页手动点击「一键追平所选表未填楼层」。', { timeOut: 3500 });
             }
@@ -3936,30 +4000,7 @@ const checkRowChanged = (realIdx, row) => {
         let fillPollStartedAt = 0;
         let fillPollLastFingerprint = null;
 
-        // 轻量指纹：只对每表的行数 + 行内单元格做滚动摘要，避免填表轮询期间
-        // 每 2s 对整份 currentJsonTableData_ACU 做 JSON.stringify（大表/高楼层时开销大）。
-        const fingerprint = (data) => {
-            if (!data || typeof data !== 'object') return '';
-            try {
-                let out = '';
-                const sheets = Object.keys(data).filter(k => k.startsWith('sheet_'));
-                for (const k of sheets) {
-                    const s = data[k];
-                    if (!s || !Array.isArray(s.content)) { out += k + ':0;'; continue; }
-                    out += k + ':' + s.content.length + ';';
-                    // 摘要采样：前 8 行每行取前 4 个单元格，捕捉数据变化又不全量序列化
-                    const limit = Math.min(s.content.length, 8);
-                    for (let r = 0; r < limit; r++) {
-                        const row = s.content[r];
-                        if (!Array.isArray(row)) { out += 'r' + r + ':0;'; continue; }
-                        const cl = Math.min(row.length, 4);
-                        for (let cc = 0; cc < cl; cc++) out += (row[cc] ?? '') + '|';
-                        out += ';';
-                    }
-                }
-                return out;
-            } catch (_) { return String(Date.now()); }
-        };
+        // 轻量指纹复用顶层 lightFingerprint（见 IIFE 顶层定义），避免重复定义。
         const inEditingContext = () => {
             const jq = getCore().$;
             return isEditingOrder || !!(jq && (jq('.acu-edit-overlay, .acu-cell-menu, .acu-quick-view-overlay').length));
@@ -3979,7 +4020,7 @@ const checkRowChanged = (realIdx, row) => {
                 // 先取轻量指纹判断是否变化；只有变化才 clone 全表（避免每次都深拷贝）
                 let rawRef = null;
                 try { rawRef = api.exportTableAsJson(); } catch (_) { rawRef = null; }
-                const fp = fingerprint(rawRef);
+                const fp = lightFingerprint(rawRef);
                 if (fillPollLastFingerprint !== null && fp !== fillPollLastFingerprint) {
                     // 数据变了：填表仍在进行或有新写入 → 刷新并重置稳定计数
                     fillPollStable = 0;
