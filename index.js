@@ -116,16 +116,8 @@
         { id: 'sunset', name: '日落沙滩' },
         { id: 'starship', name: '星际迷航' },
         { id: 'sky', name: '天空之境' },
-        { id: 'apple', name: '苹果设计' },
-        { id: 'claude', name: '克劳德风' },
-        { id: 'blushglass', name: '粉白磨砂' }
+        { id: 'apple', name: '苹果设计' }
     ];
-
-    // 毛玻璃类主题：overlay 需要拿到主题类才能套上「轻压暗 + 模糊」那组规则
-    // （普通主题的 overlay 用纯色压暗，不需要）。新增磨砂主题时加进这个表即可。
-    const GLASS_THEMES = ['apple', 'blushglass'];
-    const overlayThemeClass = (theme) =>
-        GLASS_THEMES.includes(theme) ? ` acu-theme-${theme}` : '';
 
         const FONTS = [
         { id: 'default', name: '系统默认', val: `'Segoe UI', 'Microsoft YaHei', sans-serif` },
@@ -163,21 +155,7 @@
         // 苹果设计主题：参照 Apple 毛玻璃材料规范（WWDC Designing Fluid Interfaces / Materials）——
         // 半透明毛玻璃背景 + 亮顶边（光打材料上）+ 深色系统文字；配合 .acu-nav-container 已内置的
         // backdrop-filter: blur(5px) 呈现 iOS 式 translucent material。accent 用苹果蓝 #007aff。
-        apple: { bgNav: 'rgba(246, 246, 246, 0.62)', bgPanel: 'rgba(248, 248, 250, 0.7)', border: 'rgba(255, 255, 255, 0.5)', textMain: '#1d1d1f', textSub: '#6e6e73', uiColor: '#007aff', btnBg: 'rgba(255, 255, 255, 0.55)', btnHover: 'rgba(255, 255, 255, 0.85)', btnActiveBg: '#007aff', btnActiveText: '#ffffff', tableHead: 'rgba(255, 255, 255, 0.5)', tableHover: 'rgba(0, 122, 255, 0.08)', shadow: '0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06)', cardBg: 'rgba(255, 255, 255, 0.6)', badgeBg: 'rgba(0, 122, 255, 0.12)', menuBg: 'rgba(255, 255, 255, 0.85)', menuText: '#1d1d1f', inputBg: 'rgba(255, 255, 255, 0.65)', overlayBg: 'rgba(0, 0, 0, 0.35)' },
-        // 克劳德风（Anthropic 设计系统）：色值取自官方 design token（bg-base #ECE9E0 /
-        // bg-raised #F5F3EC / bg-overlay #FDFCF8 / text #141413 / secondary #6B6860 /
-        // border-default #D8D5CC / border-subtle #E8E6DC / accent-orange #D97757 /
-        // accent-warm #C96442）。特征是暖米色纸感底 + 克制的橙作强调，不用霓虹不用渐变；
-        // 卡片按官方「工具优先」规范以边框代阴影，所以 shadow 压得极淡。
-        claude: { bgNav: '#ECE9E0', bgPanel: '#F5F3EC', border: '#D8D5CC', textMain: '#141413', textSub: '#6B6860', uiColor: '#C96442', btnBg: '#FDFCF8', btnHover: '#E8E6DC', btnActiveBg: '#D97757', btnActiveText: '#FAF9F5', tableHead: '#ECE9E0', tableHover: '#F5F3EC', shadow: 'rgba(20, 20, 19, 0.06)', cardBg: '#FDFCF8', badgeBg: 'rgba(217, 119, 87, 0.12)', menuBg: '#FDFCF8', menuText: '#141413', inputBg: '#FDFCF8', overlayBg: 'rgba(20, 20, 19, 0.45)' },
-        // 粉白磨砂：沿用苹果主题那套毛玻璃材料机制（半透明底 + backdrop blur + 亮顶边），
-        // 但把色相挪到暖粉。白是主体——所有面/卡片/按钮底都是高透明度白，只在
-        // 边框/hover/激活/徽章这些「点」上用粉，避免整片糊成粉色。
-        // accent 用玫瑰粉 #e86b9a（比 hotpink 稳，压得住白底上的文字对比度）。
-        // 注意 shadow 必须给「纯色」不能给 box-shadow 简写：全部 10 处消费方都是
-        // `box-shadow: 0 4px 15px var(--acu-shadow)`，塞简写会让整条声明失效变成无阴影
-        // （apple 主题就是这么写的，实测它其实一处阴影都没渲染）。
-        blushglass: { bgNav: 'rgba(255, 252, 253, 0.78)', bgPanel: 'rgba(255, 253, 254, 0.8)', border: 'rgba(232, 107, 154, 0.24)', textMain: '#3d2b33', textSub: '#8a7480', uiColor: '#d1568a', btnBg: 'rgba(255, 250, 252, 0.82)', btnHover: 'rgba(255, 235, 243, 0.95)', btnActiveBg: '#e86b9a', btnActiveText: '#ffffff', tableHead: 'rgba(255, 240, 247, 0.78)', tableHover: 'rgba(232, 107, 154, 0.07)', shadow: 'rgba(209, 86, 138, 0.16)', cardBg: 'rgba(255, 255, 255, 0.8)', badgeBg: 'rgba(232, 107, 154, 0.12)', menuBg: 'rgba(255, 252, 253, 0.95)', menuText: '#3d2b33', inputBg: 'rgba(255, 255, 255, 0.85)', overlayBg: 'rgba(120, 60, 85, 0.3)' }
+        apple: { bgNav: 'rgba(246, 246, 246, 0.62)', bgPanel: 'rgba(248, 248, 250, 0.7)', border: 'rgba(255, 255, 255, 0.5)', textMain: '#1d1d1f', textSub: '#6e6e73', uiColor: '#007aff', btnBg: 'rgba(255, 255, 255, 0.55)', btnHover: 'rgba(255, 255, 255, 0.85)', btnActiveBg: '#007aff', btnActiveText: '#ffffff', tableHead: 'rgba(255, 255, 255, 0.5)', tableHover: 'rgba(0, 122, 255, 0.08)', shadow: '0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06)', cardBg: 'rgba(255, 255, 255, 0.6)', badgeBg: 'rgba(0, 122, 255, 0.12)', menuBg: 'rgba(255, 255, 255, 0.85)', menuText: '#1d1d1f', inputBg: 'rgba(255, 255, 255, 0.65)', overlayBg: 'rgba(0, 0, 0, 0.35)' }
     };
 
     
@@ -723,252 +701,6 @@
                         -webkit-backdrop-filter: none !important;
                         backdrop-filter: none !important;
                     }
-                }
-
-                /* ── 粉白磨砂 ──
-                   材料机制与苹果主题同源（半透明底 + backdrop-filter + 亮顶边），色相挪到暖粉。
-                   白为主体：面和卡片一律高透明度白；粉只出现在边框微光、hover、激活、徽章上。 */
-                .acu-theme-blushglass .acu-nav-container,
-                .acu-theme-blushglass .acu-data-display,
-                .acu-theme-blushglass.acu-embedded-options-container,
-                .acu-theme-blushglass.acu-embedded-options-container .acu-option-panel,
-                .acu-theme-blushglass.acu-embedded-options-container .acu-opt-ctrl-bar,
-                .acu-theme-blushglass.acu-embedded-options-container .acu-opt-content-wrapper,
-                .acu-theme-blushglass .acu-data-card,
-                .acu-theme-blushglass .acu-dash-card {
-                    -webkit-backdrop-filter: blur(20px) saturate(170%) !important;
-                    backdrop-filter: blur(20px) saturate(170%) !important;
-                }
-                /* 白与「磨砂」的平衡点：白底不透明度太低（<0.7）会被背后深色/彩色聊天背景
-                   透上来染色，整片泛褐泛绿，白就不是主体了；垫死不透明白底又会把玻璃质感
-                   彻底杀掉，背后什么都透不出来，就不叫磨砂了。这里取 0.8 上下 —— 高饱和
-                   blur 仍能把背后揉成柔光，白又足够压住色偏。不要再往任何一边推。 */
-                .acu-theme-blushglass.acu-embedded-options-container {
-                    /* 选项容器自身透明但带 backdrop-filter，内边距那一圈会直接透出聊天内容，
-                       和里面的面板色不接。给它同样的白底色补上。 */
-                    background: rgba(255, 252, 253, 0.8) !important;
-                }
-                /* 边框用淡粉而不是亮白：白已经是主体面色，白边压在白底上等于隐形，
-                   分界只能交给粉——正好落在「粉色点缀」的用法上。 */
-                .acu-theme-blushglass .acu-nav-container,
-                .acu-theme-blushglass .acu-data-display {
-                    border: 1px solid rgba(232, 107, 154, 0.22) !important;
-                    border-top-color: rgba(232, 107, 154, 0.3) !important;
-                }
-                /* 卡片：白底磨砂 + 粉边；hover 时粉再明显一档 */
-                .acu-theme-blushglass .acu-data-card {
-                    border: 1px solid rgba(232, 107, 154, 0.2) !important;
-                }
-                .acu-theme-blushglass .acu-data-card:hover {
-                    border-color: rgba(232, 107, 154, 0.35) !important;
-                    box-shadow: 0 6px 22px rgba(209, 86, 138, 0.16) !important;
-                }
-                /* 卡片头：白磨砂上用极淡粉实线分隔，圆角对齐卡片 12px 免得四角鼓出来 */
-                .acu-theme-blushglass .acu-card-header {
-                    background: rgba(255, 245, 249, 0.55) !important;
-                    border-bottom: 1px solid rgba(232, 107, 154, 0.16) !important;
-                    border-radius: 12px 12px 0 0 !important;
-                }
-                /* 行分隔线：淡粉实线，替掉默认的灰虚线 */
-                .acu-theme-blushglass .acu-inline-item,
-                .acu-theme-blushglass .acu-full-item,
-                .acu-theme-blushglass .acu-grid-item {
-                    border-color: rgba(232, 107, 154, 0.14) !important;
-                }
-                .acu-theme-blushglass .acu-inline-item {
-                    border-bottom-style: solid !important;
-                }
-                /* 按钮 hover：淡粉底 + 粉边，激活态才用实心粉 */
-                .acu-theme-blushglass .acu-nav-btn:hover,
-                .acu-theme-blushglass .acu-opt-btn:hover,
-                .acu-theme-blushglass .acu-action-btn:hover {
-                    border-color: rgba(232, 107, 154, 0.42) !important;
-                    background: rgba(255, 240, 246, 0.92) !important;
-                }
-                /* 设置弹窗/详情弹窗：白磨砂材料化，粉只留在边缘微光 */
-                .acu-edit-dialog.acu-theme-blushglass,
-                .acu-quick-view-card.acu-theme-blushglass {
-                    background: rgba(255, 252, 253, 0.75) !important;
-                    -webkit-backdrop-filter: blur(24px) saturate(175%) !important;
-                    backdrop-filter: blur(24px) saturate(175%) !important;
-                    /* 边框同样用淡粉：白边在白底（尤其 @supports 兜底提实成 #fffafc 之后）
-                       等于隐形，弹窗会缺上边和左边。 */
-                    border: 1px solid rgba(232, 107, 154, 0.24) !important;
-                    border-top-color: rgba(232, 107, 154, 0.3) !important;
-                    color: #3d2b33 !important;
-                }
-                .acu-quick-view-card.acu-theme-blushglass .acu-quick-view-header {
-                    background: rgba(255, 245, 249, 0.6) !important;
-                    border-bottom: 1px solid rgba(232, 107, 154, 0.18) !important;
-                }
-                .acu-edit-overlay.acu-theme-blushglass,
-                .acu-quick-view-overlay.acu-theme-blushglass {
-                    background: rgba(120, 60, 85, 0.26) !important;
-                    -webkit-backdrop-filter: blur(6px) !important;
-                    backdrop-filter: blur(6px) !important;
-                }
-                /* 不支持 backdrop-filter 时提实背景（偏白，粉只留边），保证文字可读 */
-                @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-                    .acu-theme-blushglass .acu-nav-container,
-                    .acu-theme-blushglass .acu-data-display,
-                    .acu-theme-blushglass.acu-embedded-options-container,
-                    .acu-theme-blushglass.acu-embedded-options-container .acu-option-panel,
-                    .acu-theme-blushglass.acu-embedded-options-container .acu-opt-ctrl-bar,
-                    .acu-theme-blushglass.acu-embedded-options-container .acu-opt-content-wrapper {
-                        background: #fffafc !important;
-                        -webkit-backdrop-filter: none !important;
-                        backdrop-filter: none !important;
-                    }
-                    .acu-theme-blushglass .acu-data-card,
-                    .acu-theme-blushglass .acu-dash-card { background: #ffffff !important; }
-                    .acu-edit-dialog.acu-theme-blushglass,
-                    .acu-quick-view-card.acu-theme-blushglass { background: #fffafc !important; }
-                }
-                /* prefers-reduced-transparency：材料提实。
-                   选择器集合要和上面 @supports 的一致——只提实外层容器、里面的卡片和弹窗
-                   仍是半透明的话，用户明确要求的「减少透明」只被兑现了一半。 */
-                @media (prefers-reduced-transparency: reduce) {
-                    .acu-theme-blushglass .acu-nav-container,
-                    .acu-theme-blushglass .acu-data-display,
-                    .acu-theme-blushglass.acu-embedded-options-container,
-                    .acu-theme-blushglass.acu-embedded-options-container .acu-option-panel,
-                    .acu-theme-blushglass.acu-embedded-options-container .acu-opt-ctrl-bar,
-                    .acu-theme-blushglass.acu-embedded-options-container .acu-opt-content-wrapper {
-                        background: #fffafc !important;
-                        -webkit-backdrop-filter: none !important;
-                        backdrop-filter: none !important;
-                    }
-                    .acu-theme-blushglass .acu-data-card,
-                    .acu-theme-blushglass .acu-dash-card {
-                        background: #ffffff !important;
-                        -webkit-backdrop-filter: none !important;
-                        backdrop-filter: none !important;
-                    }
-                    .acu-edit-dialog.acu-theme-blushglass,
-                    .acu-quick-view-card.acu-theme-blushglass {
-                        background: #fffafc !important;
-                        -webkit-backdrop-filter: none !important;
-                        backdrop-filter: none !important;
-                    }
-                }
-
-                /* ── 克劳德风（Anthropic 设计系统）──
-                   官方规范的三条硬性特征，靠 THEME_VARS 的色值给不到，必须在这里补：
-                   1) 以边框代阴影（design-rules.md「工具优先模式」：卡片无阴影，用边框替代）
-                   2) 固定圆角刻度 --radius-sm 4px / md 8px / lg 16px，不用别处的 12px
-                   3) 缓动统一 cubic-bezier(0.16, 1, 0.3, 1)，时长 150/250ms
-                   不引入外部字体：仓库自带 woff2 无法随扩展分发，按「形散神不散」原则
-                   用系统里已有的衬线/无衬线栈保住「温暖有机 + 克制现代」的气质。 */
-                .acu-theme-claude {
-                    --acu-claude-ease: cubic-bezier(0.16, 1, 0.3, 1);
-                }
-                /* 卡片/面板：边框优先，阴影几乎不可见（只留一层极淡的分层感）。
-                   .acu-quick-view-card 的主题类挂在自身而非祖先，写成后代选择器永不命中，
-                   所以放到下面和圆角规则一起用 .acu-quick-view-card.acu-theme-claude 写。
-                   导航栏排除胶囊折叠态：那条规则的 border-radius:50px 没带 !important，
-                   会被这里压成 8px，胶囊就变成小方块了。 */
-                .acu-theme-claude .acu-data-card,
-                .acu-theme-claude .acu-dash-card,
-                .acu-theme-claude .acu-nav-container:not(.acu-collapse-pill),
-                .acu-theme-claude .acu-data-display {
-                    box-shadow: none !important;
-                    border: 1px solid var(--acu-border) !important;
-                    border-radius: 8px !important;
-                }
-                /* 胶囊折叠态：保留 50px 圆角，只接管边框/阴影 */
-                .acu-theme-claude .acu-nav-container.acu-collapse-pill {
-                    box-shadow: none !important;
-                    border: 1px solid var(--acu-border) !important;
-                }
-                .acu-quick-view-card.acu-theme-claude {
-                    box-shadow: none !important;
-                    border: 1px solid var(--acu-border) !important;
-                }
-                /* hover 才给阴影（design-rules.md 上下文 Token 表：默认模式 hover 时显示） */
-                .acu-theme-claude .acu-data-card:hover {
-                    box-shadow: 0 2px 8px rgba(20, 20, 19, 0.06) !important;
-                    border-color: #9B9890 !important;
-                }
-                /* 按钮：小圆角 + 官方缓动；强调按钮用暖橙，不用渐变 */
-                .acu-theme-claude .acu-nav-btn,
-                .acu-theme-claude .acu-action-btn,
-                .acu-theme-claude .acu-opt-btn,
-                .acu-theme-claude .acu-page-btn,
-                .acu-theme-claude .acu-header-btn,
-                .acu-theme-claude .acu-btn-block,
-                .acu-theme-claude .acu-dialog-btn {
-                    border-radius: 4px !important;
-                    box-shadow: none !important;
-                    transition: background var(--acu-claude-ease) 150ms,
-                                border-color var(--acu-claude-ease) 150ms,
-                                color var(--acu-claude-ease) 150ms !important;
-                }
-                /* 表格：官方 Table 组件是 subtle 分隔线 + raised 底 hover，没有斑马纹。
-                   .acu-grid-item 也要一起软化，否则网格格子的边比相邻行明显硬一档。 */
-                .acu-theme-claude .acu-full-item,
-                .acu-theme-claude .acu-inline-item,
-                .acu-theme-claude .acu-grid-item {
-                    border-color: #E8E6DC !important;
-                }
-                /* 面板头/脚的圆角也要跟着卡片对齐到 8px，否则 12px 的头压在 8px 的面板里，
-                   顶部两角会露出一线 #ECE9E0 的色差（和上面 .acu-card-header 同类问题）。 */
-                .acu-theme-claude .acu-panel-header {
-                    border-radius: 8px 8px 0 0 !important;
-                }
-                .acu-theme-claude .acu-inline-item {
-                    border-bottom-style: solid !important;
-                }
-                /* 选项面板：纸感底 + 边框，橙色只用在 hover/激活，避免大面积橙 */
-                .acu-theme-claude .acu-opt-btn:hover {
-                    border-color: #D97757 !important;
-                    background: rgba(217, 119, 87, 0.08) !important;
-                }
-                /* 选项按钮装的是整句中文，官方 typography-cn 要求中文行高 1.7–1.8、
-                   正文字号下限 15px；再按 space-3/space-4 给足内距，免得长句挤成两行还贴边。
-                   列数是用户设置项（--acu-opt-btn-w），不在主题里改；这里只把断行方式从
-                   break-word 换成 normal，避免「回春/丹」这种末行只剩一个字的孤字。 */
-                .acu-theme-claude .acu-opt-btn {
-                    padding: 12px 16px !important;
-                    line-height: 1.75 !important;
-                    min-height: 44px !important;
-                    word-break: normal !important;
-                    /* 必须是 anywhere 不能是 break-word：break-word 不参与 min-content 计算，
-                       flex 项的自动最小尺寸仍按整串不可断的宽度算，配上 .acu-opt-btn 自带的
-                       overflow:hidden 会把超出部分静默裁掉（实测长 URL 287px 挤进 179px）。
-                       anywhere 会缩 min-content，长串正常折行，中文不产生孤字的收益也保留。 */
-                    overflow-wrap: anywhere !important;
-                }
-                /* 弹窗：官方 Modal 用 bg-overlay 纸白 + lg 圆角 */
-                .acu-theme-claude.acu-edit-dialog,
-                .acu-theme-claude .acu-edit-dialog {
-                    border-radius: 16px !important;
-                    border: 1px solid var(--acu-border) !important;
-                    box-shadow: 0 4px 24px rgba(20, 20, 19, 0.10) !important;
-                }
-                .acu-quick-view-card.acu-theme-claude {
-                    border-radius: 16px !important;
-                }
-                /* 卡片头：基础样式写死 12px 圆角和 dashed 边，与本主题 8px 圆角 + 实线分隔冲突。
-                   dashed 用的是 --acu-border，但本主题 --acu-title-color 是近黑，视觉上过硬，
-                   这里统一压成 subtle 实线，并把圆角对齐卡片的 8px 免得头部四角鼓出来。 */
-                .acu-theme-claude .acu-card-header {
-                    border-radius: 8px 8px 0 0 !important;
-                    border-bottom: 1px solid #E8E6DC !important;
-                }
-                /* 标题用衬线体呼应官方 Lora/DM Serif 的「温暖有机」气质，
-                   正文保持无衬线以便扫读（工具优先模式的原话：衬线体不利于快速浏览）。 */
-                .acu-theme-claude .acu-panel-title,
-                .acu-theme-claude .acu-quick-view-header,
-                .acu-theme-claude .acu-editable-title,
-                .acu-theme-claude .acu-card-header {
-                    font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', 'STSong', Georgia, serif !important;
-                    letter-spacing: 0.01em;
-                }
-                /* 中文排版：官方 typography-cn 要求正文行高 1.7–1.8（1.55 对中文偏紧） */
-                .acu-theme-claude .acu-full-value,
-                .acu-theme-claude .acu-inline-value,
-                .acu-theme-claude .acu-grid-value {
-                    line-height: 1.75 !important;
                 }
 
                 .acu-badge-pending { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-15deg); width: 80px; height: 80px; border: 4px solid #e74c3c; border-radius: 50%; color: #e74c3c; font-size: 20px; font-weight: 900; display: flex; align-items: center; justify-content: center; z-index: 50; pointer-events: none; opacity: 0.6; box-shadow: inset 0 0 10px rgba(231, 76, 60, 0.2); background: rgba(255,255,255,0.1); }
@@ -1838,7 +1570,7 @@
 
 
         const dialog = $(`
-            <div class="acu-edit-overlay${overlayThemeClass(config.theme)}">
+            <div class="acu-edit-overlay${config.theme === 'apple' ? ' acu-theme-apple' : ''}">
                 ${modalStyles}
                 <div class="acu-edit-dialog acu-theme-${config.theme}">                     <div class="acu-edit-header">
                         <span style="font-size:13px; font-weight:bold;">设置选项</span>
@@ -4059,7 +3791,7 @@ const checkRowChanged = (realIdx, row) => {
         });
         
         const html = `
-            <div class="acu-quick-view-overlay${overlayThemeClass(config.theme)}">
+            <div class="acu-quick-view-overlay${config.theme === 'apple' ? ' acu-theme-apple' : ''}">
                 <div class="acu-quick-view-card acu-theme-${config.theme}" style="--acu-font-size: ${config.fontSize}px; font-size: ${config.fontSize}px;; --acu-text-max-height:${config.limitLongText!==false?'80px':'none'}; --acu-text-overflow:${config.limitLongText!==false?'auto':'visible'}">
                      <div class="acu-quick-view-header">
                         <span><i class="fa-solid ${getIconForTableName(tableName)}"></i> ${row[(titleColIdx !== undefined && titleColIdx !== null) ? titleColIdx : 1] || '详情'}</span>
@@ -4334,7 +4066,7 @@ const checkRowChanged = (realIdx, row) => {
         }).join('');
 
         const dialog = $(`
-            <div class="acu-edit-overlay${overlayThemeClass(config.theme)}">
+            <div class="acu-edit-overlay${config.theme === 'apple' ? ' acu-theme-apple' : ''}">
                 <div class="acu-edit-dialog acu-theme-${config.theme}">
                     <div class="acu-edit-title">整体编辑 (#${rowIndex + 1})</div>
                     <div class="acu-settings-content" style="flex:1; overflow-y:auto;">
@@ -4393,7 +4125,7 @@ const checkRowChanged = (realIdx, row) => {
         const { $ } = getCore();
         const config = getConfig();
         const dialog = $(`
-            <div class="acu-edit-overlay${overlayThemeClass(config.theme)}">
+            <div class="acu-edit-overlay${config.theme === 'apple' ? ' acu-theme-apple' : ''}">
                 <div class="acu-edit-dialog acu-theme-${config.theme}">
                     <div class="acu-edit-title">编辑单元格内容</div>
                     <textarea class="acu-edit-textarea">${content}</textarea>
@@ -4441,7 +4173,7 @@ const checkRowChanged = (realIdx, row) => {
         }
 
         const dialog = $(`
-            <div class="acu-edit-overlay${overlayThemeClass(config.theme)}">
+            <div class="acu-edit-overlay${config.theme === 'apple' ? ' acu-theme-apple' : ''}">
                 <div class="acu-edit-dialog acu-theme-${config.theme}" style="max-width: 400px; height: auto; max-height: 90vh; overflow: hidden;">
                     <div class="acu-edit-title" style="display:flex; justify-content:space-between; align-items:center; padding:15px;">
                         <button id="dlg-slot-reset" style="background:transparent; border:none; color:var(--acu-text-sub); cursor:pointer; font-size:12px; display:flex; align-items:center; gap:4px; padding:5px; border-radius:4px; transition:background 0.2s;">
