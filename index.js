@@ -114,7 +114,8 @@
         { id: 'aurora', name: '极光幻境' },
         { id: 'sunset', name: '日落沙滩' },
         { id: 'starship', name: '星际迷航' },
-        { id: 'sky', name: '天空之境' }
+        { id: 'sky', name: '天空之境' },
+        { id: 'apple', name: '苹果设计' }
     ];
 
         const FONTS = [
@@ -149,7 +150,11 @@
         aurora: { uiColor: '#38bdf8', bgNav: 'linear-gradient(135deg, rgba(15, 23, 42, 0.95), rgba(30, 41, 59, 0.9))', bgPanel: 'linear-gradient(180deg, rgba(15, 23, 42, 0.95) 0%, rgba(51, 65, 85, 0.9) 100%)', border: 'rgba(56, 189, 248, 0.6)', textMain: '#ffffff', textSub: '#cccccc', btnBg: 'linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(168, 85, 247, 0.15))', btnHover: 'linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(168, 85, 247, 0.25))', btnActiveBg: 'linear-gradient(135deg, #38bdf8, #a855f7)', btnActiveText: '#fff', tableHead: 'linear-gradient(90deg, rgba(56, 189, 248, 0.1), rgba(168, 85, 247, 0.1))', tableHover: 'rgba(56, 189, 248, 0.08)', shadow: '0 8px 32px rgba(56, 189, 248, 0.15), 0 4px 16px rgba(168, 85, 247, 0.1)', cardBg: 'linear-gradient(145deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.98))', badgeBg: 'rgba(56, 189, 248, 0.2)', menuBg: '#1e293b', menuText: '#e2e8f0', inputBg: 'rgba(15, 23, 42, 0.5)', overlayBg: 'rgba(15, 23, 42, 0.8)' },
         sunset: { bgNav: 'linear-gradient(135deg, #fffaf0 0%, #fff9e6 50%, #fff5fa 100%)', bgPanel: 'linear-gradient(180deg, #fffcf5 0%, #fffafa 100%)', border: 'rgba(251, 146, 60, 0.85)', textMain: '#8a4a3b', textSub: '#d97757', btnBg: 'linear-gradient(135deg, rgba(251, 146, 60, 0.1), rgba(244, 114, 182, 0.1))', btnHover: 'linear-gradient(135deg, rgba(251, 146, 60, 0.2), rgba(244, 114, 182, 0.2))', btnActiveBg: 'linear-gradient(135deg, #ffab73, #f48fb1)', btnActiveText: '#fff', tableHead: 'linear-gradient(90deg, rgba(251, 191, 36, 0.1), rgba(251, 113, 133, 0.1))', tableHover: 'rgba(251, 146, 60, 0.05)', shadow: '0 8px 32px rgba(251, 146, 60, 0.15), 0 4px 16px rgba(244, 114, 182, 0.1)', cardBg: 'linear-gradient(145deg, #fffcf7, #fffafa)', badgeBg: '#fffaf5', menuBg: '#fff', menuText: '#8a4a3b', inputBg: 'rgba(255,255,255,0.7)', overlayBg: 'rgba(124, 45, 18, 0.1)' },
         starship: { uiColor: '#6366f1', bgNav: 'radial-gradient(ellipse at top, rgba(30, 27, 75, 0.98), rgba(15, 23, 42, 0.95)), linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%)', bgPanel: 'linear-gradient(180deg, rgba(30, 27, 75, 0.98) 0%, rgba(49, 46, 129, 0.95) 100%)', border: 'rgba(199, 210, 254, 0.6)', textMain: '#ffffff', textSub: '#cccccc', btnBg: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(236, 72, 153, 0.15), rgba(34, 211, 238, 0.1))', btnHover: 'linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(236, 72, 153, 0.25), rgba(34, 211, 238, 0.2))', btnActiveBg: 'linear-gradient(135deg, #6366f1, #ec4899, #22d3ee)', btnActiveText: '#fff', tableHead: 'linear-gradient(90deg, rgba(99, 102, 241, 0.15), rgba(236, 72, 153, 0.1))', tableHover: 'rgba(99, 102, 241, 0.1)', shadow: '0 8px 40px rgba(99, 102, 241, 0.2), 0 4px 20px rgba(236, 72, 153, 0.1)', cardBg: 'linear-gradient(145deg, rgba(30, 27, 75, 0.95), rgba(49, 46, 129, 0.9))', badgeBg: 'rgba(99, 102, 241, 0.2)', menuBg: '#1e1b4b', menuText: '#e0e7ff', inputBg: 'rgba(0,0,0,0.4)', overlayBg: 'rgba(0,0,0,0.85)' },
-        sky: { bgNav: 'linear-gradient(135deg, rgba(224, 242, 254, 0.95), rgba(238, 242, 255, 0.95))', bgPanel: 'linear-gradient(180deg, rgba(240, 249, 255, 0.95) 0%, rgba(230, 240, 255, 0.9) 100%)', border: 'rgba(56, 189, 248, 0.6)', textMain: '#000000', textSub: '#555555', uiColor: '#3b82f6', btnBg: 'linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(129, 140, 248, 0.15))', btnHover: 'linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(129, 140, 248, 0.25))', btnActiveBg: 'linear-gradient(135deg, #38bdf8, #818cf8)', btnActiveText: '#fff', tableHead: 'linear-gradient(90deg, rgba(56, 189, 248, 0.1), rgba(129, 140, 248, 0.1))', tableHover: 'rgba(56, 189, 248, 0.08)', shadow: '0 8px 32px rgba(56, 189, 248, 0.15), 0 4px 16px rgba(129, 140, 248, 0.1)', cardBg: 'linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(240, 249, 255, 0.95))', badgeBg: 'rgba(56, 189, 248, 0.2)', menuBg: '#f0f9ff', menuText: '#0f172a', inputBg: 'rgba(255, 255, 255, 0.6)', overlayBg: 'rgba(15, 23, 42, 0.15)' }
+        sky: { bgNav: 'linear-gradient(135deg, rgba(224, 242, 254, 0.95), rgba(238, 242, 255, 0.95))', bgPanel: 'linear-gradient(180deg, rgba(240, 249, 255, 0.95) 0%, rgba(230, 240, 255, 0.9) 100%)', border: 'rgba(56, 189, 248, 0.6)', textMain: '#000000', textSub: '#555555', uiColor: '#3b82f6', btnBg: 'linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(129, 140, 248, 0.15))', btnHover: 'linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(129, 140, 248, 0.25))', btnActiveBg: 'linear-gradient(135deg, #38bdf8, #818cf8)', btnActiveText: '#fff', tableHead: 'linear-gradient(90deg, rgba(56, 189, 248, 0.1), rgba(129, 140, 248, 0.1))', tableHover: 'rgba(56, 189, 248, 0.08)', shadow: '0 8px 32px rgba(56, 189, 248, 0.15), 0 4px 16px rgba(129, 140, 248, 0.1)', cardBg: 'linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(240, 249, 255, 0.95))', badgeBg: 'rgba(56, 189, 248, 0.2)', menuBg: '#f0f9ff', menuText: '#0f172a', inputBg: 'rgba(255, 255, 255, 0.6)', overlayBg: 'rgba(15, 23, 42, 0.15)' },
+        // 苹果设计主题：参照 Apple 毛玻璃材料规范（WWDC Designing Fluid Interfaces / Materials）——
+        // 半透明毛玻璃背景 + 亮顶边（光打材料上）+ 深色系统文字；配合 .acu-nav-container 已内置的
+        // backdrop-filter: blur(5px) 呈现 iOS 式 translucent material。accent 用苹果蓝 #007aff。
+        apple: { bgNav: 'rgba(246, 246, 246, 0.62)', bgPanel: 'rgba(248, 248, 250, 0.7)', border: 'rgba(255, 255, 255, 0.5)', textMain: '#1d1d1f', textSub: '#6e6e73', uiColor: '#007aff', btnBg: 'rgba(255, 255, 255, 0.55)', btnHover: 'rgba(255, 255, 255, 0.85)', btnActiveBg: '#007aff', btnActiveText: '#ffffff', tableHead: 'rgba(255, 255, 255, 0.5)', tableHover: 'rgba(0, 122, 255, 0.08)', shadow: '0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06)', cardBg: 'rgba(255, 255, 255, 0.6)', badgeBg: 'rgba(0, 122, 255, 0.12)', menuBg: 'rgba(255, 255, 255, 0.85)', menuText: '#1d1d1f', inputBg: 'rgba(255, 255, 255, 0.65)', overlayBg: 'rgba(0, 0, 0, 0.35)' }
     };
 
     
@@ -631,7 +636,51 @@
                 /* 国内镜像字体源，无需VPN */
                 @import url('https://fonts.loli.net/css2?family=Long+Cang&family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@400;700&family=Noto+Serif+SC:wght@400;700&family=ZCOOL+KuaiLe&family=Zhi+Mang+Xing&display=swap');
 
-                
+                /* 苹果设计主题：毛玻璃材料增强 + 降级兜底 */
+                /* 亮顶边 = 光打在材料上（Apple Materials 规范），半透明毛玻璃配合既有 backdrop-filter。
+                   注意：嵌入容器 .acu-embedded-options-container 自身带 acu-theme-apple 类（与 .acu-wrapper
+                   平级挂载），故用「.acu-theme-apple.acu-embedded-options-container」同元素组合，非后代组合。 */
+                .acu-theme-apple .acu-nav-container,
+                .acu-theme-apple .acu-data-display,
+                .acu-theme-apple.acu-embedded-options-container,
+                .acu-theme-apple.acu-embedded-options-container .acu-option-panel,
+                .acu-theme-apple.acu-embedded-options-container .acu-opt-ctrl-bar,
+                .acu-theme-apple.acu-embedded-options-container .acu-opt-content-wrapper {
+                    border-top: 1px solid rgba(255, 255, 255, 0.65) !important;
+                    border-left: 1px solid rgba(255, 255, 255, 0.4) !important;
+                    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+                    backdrop-filter: blur(20px) saturate(180%) !important;
+                }
+                /* 不支持 backdrop-filter 时提实背景，保证文字可读（对应 prefers-reduced-transparency 精神） */
+                @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+                    .acu-theme-apple .acu-nav-container,
+                    .acu-theme-apple .acu-data-display,
+                    .acu-theme-apple.acu-embedded-options-container,
+                    .acu-theme-apple.acu-embedded-options-container .acu-option-panel,
+                    .acu-theme-apple.acu-embedded-options-container .acu-opt-ctrl-bar,
+                    .acu-theme-apple.acu-embedded-options-container .acu-opt-content-wrapper {
+                        background: #f5f5f7 !important;
+                        -webkit-backdrop-filter: none !important;
+                        backdrop-filter: none !important;
+                    }
+                    .acu-theme-apple .acu-data-card {
+                        background: #ffffff !important;
+                    }
+                }
+                /* prefers-reduced-transparency：降低毛玻璃透明度（材料更实） */
+                @media (prefers-reduced-transparency: reduce) {
+                    .acu-theme-apple .acu-nav-container,
+                    .acu-theme-apple .acu-data-display,
+                    .acu-theme-apple.acu-embedded-options-container,
+                    .acu-theme-apple.acu-embedded-options-container .acu-option-panel,
+                    .acu-theme-apple.acu-embedded-options-container .acu-opt-ctrl-bar,
+                    .acu-theme-apple.acu-embedded-options-container .acu-opt-content-wrapper {
+                        background: #f5f5f7 !important;
+                        -webkit-backdrop-filter: none !important;
+                        backdrop-filter: none !important;
+                    }
+                }
+
                 .acu-badge-pending { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotate(-15deg); width: 80px; height: 80px; border: 4px solid #e74c3c; border-radius: 50%; color: #e74c3c; font-size: 20px; font-weight: 900; display: flex; align-items: center; justify-content: center; z-index: 50; pointer-events: none; opacity: 0.6; box-shadow: inset 0 0 10px rgba(231, 76, 60, 0.2); background: rgba(255,255,255,0.1); }
                 @keyframes acu-alert-pulse { 0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.7); } 70% { box-shadow: 0 0 0 10px rgba(231, 76, 60, 0); } 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); } }
                 .acu-btn-save-mode { color: #e74c3c !important; border-color: #e74c3c !important; animation: acu-alert-pulse 2s infinite; }
