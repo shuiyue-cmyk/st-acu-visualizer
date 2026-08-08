@@ -23,7 +23,6 @@
     let isEditingOrder = false;
     let currentDiffMap = new Set();
     let observer = null;
-    let columnResizeObserver = null;
     let isCollapsed = localStorage.getItem(STORAGE_KEY_UI_COLLAPSE) === 'true';
     let globalScrollTop = 0;
     let currentPage = 1;
@@ -1034,67 +1033,12 @@
                     -webkit-backdrop-filter: blur(6px) !important;
                     backdrop-filter: blur(6px) !important;
                 }
-                /* 苹果主题详情弹窗（点单元格/卡片弹出的快速查看）：
-                   默认只有 background: var(--acu-card-bg)，苹果主题下那是 rgba(255,255,255,0.6)——
-                   半透明白底却没有 backdrop-filter，深色文字直接压在聊天内容上，几乎读不了。
-                   这里补上与设置弹窗一致的毛玻璃材料 + 提高底色不透明度保证对比度。 */
-                .acu-quick-view-card.acu-theme-apple {
-                    background: rgba(250, 250, 252, 0.72) !important;
-                    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
-                    backdrop-filter: blur(24px) saturate(180%) !important;
-                    border-top: 1px solid rgba(255, 255, 255, 0.7) !important;
-                    border-left: 1px solid rgba(255, 255, 255, 0.45) !important;
-                    color: #1d1d1f !important;
-                }
-                /* 表头/正文分区在毛玻璃上要用极浅的实色分隔，避免叠加透明层糊成一片 */
-                .acu-quick-view-card.acu-theme-apple .acu-quick-view-header {
-                    background: rgba(255, 255, 255, 0.5) !important;
-                    border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
-                }
-                .acu-quick-view-card.acu-theme-apple .acu-full-item,
-                .acu-quick-view-card.acu-theme-apple .acu-grid-item {
-                    background: rgba(255, 255, 255, 0.55) !important;
-                    border: 1px solid rgba(0, 0, 0, 0.06) !important;
-                }
-                .acu-quick-view-card.acu-theme-apple .acu-full-item:hover,
-                .acu-quick-view-card.acu-theme-apple .acu-grid-item:hover {
-                    background: rgba(0, 122, 255, 0.08) !important;
-                }
-                /* 列表布局（savedStyles 缺省即 'list'，是最常见的布局）用 .acu-inline-item，
-                   其分隔线是 1px dashed var(--acu-border)——苹果主题下那是 rgba(255,255,255,0.5)，
-                   压在浅色毛玻璃上等于看不见。这里换成极浅实色，保证行与行分得开。 */
-                .acu-quick-view-card.acu-theme-apple .acu-inline-item {
-                    border-bottom-color: rgba(0, 0, 0, 0.08) !important;
-                }
-                .acu-quick-view-card.acu-theme-apple .acu-inline-item:hover {
-                    background: rgba(0, 122, 255, 0.08) !important;
-                }
-                .acu-quick-view-card.acu-theme-apple .acu-full-value,
-                .acu-quick-view-card.acu-theme-apple .acu-inline-value,
-                .acu-quick-view-card.acu-theme-apple .acu-grid-value {
-                    color: #1d1d1f !important;
-                }
-                .acu-quick-view-card.acu-theme-apple .acu-full-label,
-                .acu-quick-view-card.acu-theme-apple .acu-inline-label,
-                .acu-quick-view-card.acu-theme-apple .acu-grid-label {
-                    color: #6e6e73 !important;
-                }
-                /* 苹果主题详情弹窗 overlay：轻压暗 + 模糊，和设置弹窗一致 */
-                .acu-quick-view-overlay.acu-theme-apple {
-                    background: rgba(0, 0, 0, 0.28) !important;
-                    -webkit-backdrop-filter: blur(6px) !important;
-                    backdrop-filter: blur(6px) !important;
-                }
-                /* 不支持 backdrop-filter 时设置弹窗/详情弹窗都提实背景 */
+                /* 不支持 backdrop-filter 时设置弹窗提实背景 */
                 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
                     .acu-edit-dialog.acu-theme-apple { background-color: #f5f5f7 !important; }
                     .acu-edit-dialog.acu-theme-apple textarea,
                     .acu-edit-dialog.acu-theme-apple input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
                     .acu-edit-dialog.acu-theme-apple select { background-color: #ffffff !important; }
-                    .acu-quick-view-card.acu-theme-apple { background: #f5f5f7 !important; }
-                    .acu-quick-view-card.acu-theme-apple .acu-quick-view-header { background: #ffffff !important; }
-                    .acu-quick-view-card.acu-theme-apple .acu-full-item,
-                    .acu-quick-view-card.acu-theme-apple .acu-grid-item { background: #ffffff !important; }
                 }
                 
                 .acu-theme-modern .acu-opt-btn { background: var(--acu-btn-bg) !important; }
@@ -2128,8 +2072,6 @@ ${allTableNames.map(tName => {
                 const $opts = $target.find('.acu-embedded-options-container');
                 if ($opts.length) { $opts.before($container); } else { $target.append($container); }
             }
-            // 新建/原地更新后都要对齐正文列，否则容器保持 width:100% 会比 wrapper 宽
-            alignWrapperToMessageColumn();
         } else {
             $('.acu-embedded-dashboard-container').remove();
         }
@@ -2243,8 +2185,6 @@ ${allTableNames.map(tName => {
 
                 $target.append($container);
             }
-            // 新建/原地更新后都要对齐正文列，否则容器保持 width:100% 会比 wrapper 宽
-            alignWrapperToMessageColumn();
         } else {
              $('.acu-embedded-options-container').remove();
         }
@@ -2740,107 +2680,6 @@ ${allTableNames.map(tName => {
         return html;
     };
 
-    // 挑一条能代表正文列几何的消息来量。
-    //
-    // 不能无脑取最后一条：ST 给系统小消息加 .smallSysMes，其样式把
-    // `.mes_text { padding: 0 !important }`、`.mes_block { margin-right: unset !important }`，
-    // 量到的「正文宽」等于整块宽，面板就会又宽出 30px —— 正是本次要修的溢出。
-    // 所以优先取最后一条正常消息（非系统/非小系统），没有再退回最后一条。
-    const getMeasurableMes = () => {
-        const { $ } = getCore();
-        const $all = $('#chat .mes');
-        if (!$all.length) return null;
-        const $normal = $all.filter(function () {
-            const $m = $(this);
-            if ($m.hasClass('smallSysMes') || $m.hasClass('sys_mes')) return false;
-            if ($m.attr('is_system') === 'true') return false;
-            // 与 getTargetContainer 一致：隐藏的消息量出来全是 0，会白白放弃对齐
-            if ($m.css('display') === 'none') return false;
-            return true;
-        });
-        const $pick = $normal.length ? $normal.last() : $all.last();
-        return $pick.length ? $pick : null;
-    };
-
-    // 正文列内容盒 = .mes_text 去掉左右 padding 后的可视文字区。
-    // 取不到（正文被 inline_media 隐藏、消息不可见等）时回退到 .mes_block 内容宽
-    // 减去 --mes-right-spacing，保证仍能对齐而不是干脆放弃。
-    const getMessageColumnBox = ($lastMes) => {
-        const contentBox = (el) => {
-            const r = el.getBoundingClientRect();
-            const cs = window.getComputedStyle(el);
-            const pl = parseFloat(cs.paddingLeft) || 0;
-            const pr = parseFloat(cs.paddingRight) || 0;
-            return { left: r.left + pl, width: r.width - pl - pr };
-        };
-
-        const $mesText = $lastMes.find('.mes_text').first();
-        if ($mesText.length && $mesText.is(':visible')) {
-            const box = contentBox($mesText[0]);
-            if (box.width > 0) return { box, contentBox };
-        }
-        // 回退：.mes_block 内容宽 - 正文右留白。
-        // 没有 .mes_block 时不要退到 .mes——那个盒子含头像，量出来会偏左偏宽，
-        // 宁可放弃对齐（保持原宽度）也不要对到错的盒子上。
-        const $block = $lastMes.find('.mes_block').first();
-        if (!$block.length) return null;
-        const box = contentBox($block[0]);
-        // 右留白直接读 .mes_text 的 computed padding-right：CSSOM 给的是已换算好的
-        // 绝对 px，display:none 的元素同样能读到，所以不必解析 --mes-right-spacing
-        // 的原始 token（'2em' 之类 parseFloat 会读错），也不用往 DOM 里塞探针。
-        let spacing = 30; // 兜底用 ST 根变量默认值，别用 0——那等于没修
-        if ($mesText.length) {
-            const px = parseFloat(window.getComputedStyle($mesText[0]).paddingRight);
-            if (px >= 0) spacing = px;
-        }
-        box.width -= spacing;
-        return box.width > 0 ? { box, contentBox } : null;
-    };
-
-    // 把一个注入到消息里的面板对齐到正文列。
-    //
-    // 关键点：.mes_text 有 padding-right: var(--mes-right-spacing)（ST 默认 30px），
-    // 所以 outerWidth() 含这段留白，恰好等于 .mes_block 的内容宽 —— 也就是面板
-    // 作为块级子元素本来就有的宽度。早前版本用 outerWidth() 赋值是空操作，面板始终右溢。
-    // 这里一律取「内容宽」，并用 margin-left 补上面板父容器与正文列的左缘差
-    // （挂 .mes_block 时为 0；bottom 模式挂 #chat 时为头像+间距，约 70px）。
-    //
-    // 注意：选项容器的样式表规则带 !important（见 .acu-embedded-options-container），
-    // 普通内联样式压不过它，必须用 setProperty 的 important 优先级写入。
-    const alignPanelToMessageColumn = ($panel, column) => {
-        if (!$panel || !$panel.length || !column) return;
-        const { box, contentBox } = column;
-        try {
-            const el = $panel[0];
-            const parentEl = el && el.parentElement;
-            if (!parentEl) return;
-            const parent = contentBox(parentEl);
-            const width = box.width + 'px';
-            const marginLeft = (box.left - parent.left) + 'px';
-            el.style.setProperty('width', width, 'important');
-            el.style.setProperty('max-width', width, 'important');
-            el.style.setProperty('margin-left', marginLeft, 'important');
-            el.style.setProperty('margin-right', '0', 'important');
-        } catch (e) {
-            // 保持原宽度，不影响功能。留一条 debug：对齐失效过去很难发现
-            // （量错宽度只是视觉偏移，不报错），排查时至少有个抓手。
-            console.debug('[ACU-UI] 正文列对齐失败:', e);
-        }
-    };
-
-    // 三个面板都注入在同一个 .mes_block 里（wrapper / 嵌入仪表盘 / 嵌入选项），
-    // 只对齐其中一个会让它们右缘参差，所以统一在这里一起对齐。
-    const alignWrapperToMessageColumn = () => {
-        const { $ } = getCore();
-        const $mes = getMeasurableMes();
-        if (!$mes) return;
-        const column = getMessageColumnBox($mes);
-        if (!column) return;
-        alignPanelToMessageColumn($('.acu-wrapper'), column);
-        alignPanelToMessageColumn($('.acu-embedded-dashboard-container'), column);
-        alignPanelToMessageColumn($('.acu-embedded-options-container'), column);
-    };
-
     const insertHtmlToPage = (html) => {
         const { $ } = getCore();
         const $chat = $('#chat');
@@ -2855,13 +2694,32 @@ ${allTableNames.map(tName => {
              if ($lastMes.length) {
                  const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
                  $targetBlock.append($newContent);
-                 alignWrapperToMessageColumn();
+                 // message 模式：对齐消息正文列宽度（.mes_text 比 .mes_block 窄，
+                 // 右侧有 --mes-right-spacing 留白；wrapper 撑满 .mes_block 会右溢贴边）。
+                 try {
+                     const $mesText = $lastMes.find('.mes_text').first();
+                     if ($mesText.length && $mesText.is(':visible')) {
+                         const textW = $mesText.outerWidth();
+                         if (textW > 0) {
+                             $newContent.css({ width: textW + 'px', 'max-width': textW + 'px', 'margin-left': '0', 'margin-right': 'auto' });
+                         }
+                     }
+                 } catch (e) { console.warn('[ACU-UI] 消息正文对齐失败:', e); }
              } else {
                  if ($chat.length) $chat.append($newContent); else $('body').append($newContent);
              }
         } else {
             if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
-            alignWrapperToMessageColumn();
+            // bottom 模式：对齐消息列宽度
+            try {
+                const $lastMes = $chat.find('.mes').last();
+                if ($lastMes.length && $newContent.length) {
+                    const mesW = $lastMes.outerWidth();
+                    if (mesW > 0) {
+                        $newContent.css({ width: mesW + 'px', 'max-width': mesW + 'px', 'margin-left': 'auto', 'margin-right': 'auto' });
+                    }
+                }
+            } catch (e) { console.warn('[ACU-UI] 消息列对齐失败，保持原宽度:', e); }
         }
 
         // 优化：去掉 subtree 监听，只观察 #chat 直接子级增删（新 .mes 是 #chat 直接子元素）。
@@ -2886,7 +2744,16 @@ ${allTableNames.map(tName => {
                         } else if ($targetBlock.children().last()[0] !== $wrapper[0]) {
                             $targetBlock.append($wrapper);
                         }
-                        alignWrapperToMessageColumn();
+                        // message 模式：对齐消息正文列宽度（.mes_text 有右侧留白，wrapper 撑满 .mes_block 会右溢）
+                        try {
+                            const $mesText = $lastMes.find('.mes_text').first();
+                            if ($mesText.length && $mesText.is(':visible') && $wrapper.length) {
+                                const textW = $mesText.outerWidth();
+                                if (textW > 0) {
+                                    $wrapper.css({ width: textW + 'px', 'max-width': textW + 'px', 'margin-left': '0', 'margin-right': 'auto' });
+                                }
+                            }
+                        } catch (e) { /* 对齐失败忽略 */ }
                     }
                 } else {
                     const children = $chatNode.children();
@@ -2896,42 +2763,44 @@ ${allTableNames.map(tName => {
                             $chatNode.append($wrapper);
                         }
                     }
-                    // 消息增删后重新对齐面板到正文列
-                    alignWrapperToMessageColumn();
+                    // bottom 模式：消息增删/resize 后重新对齐 wrapper 到消息列宽度
+                    if (currentConfig.frontendPosition !== 'message') {
+                        try {
+                            const $lastMes = $chatNode.find('.mes').last();
+                            if ($lastMes.length && $wrapper.length) {
+                                const mesW = $lastMes.outerWidth();
+                                if (mesW > 0) {
+                                    $wrapper.css({ width: mesW + 'px', 'max-width': mesW + 'px', 'margin-left': 'auto', 'margin-right': 'auto' });
+                                }
+                            }
+                        } catch (e) { /* 对齐失败忽略 */ }
+                    }
                 }
             });
         };
         if (observer) observer.disconnect();
         observer = new MutationObserver(handleChatMutation);
 
-        // 窗口 resize / 转屏后消息列宽度变化，复用对齐逻辑防重新贴边。
-        // rAF 合并，避免转屏/软键盘的 resize 风暴里反复强制布局。
-        let resizeRafPending = false;
+        // 窗口 resize / 转屏后消息列宽度变化，复用对齐逻辑防重新贴边
         $(window).off('resize.acu_align').on('resize.acu_align', () => {
-            if (resizeRafPending) return;
-            resizeRafPending = true;
-            requestAnimationFrame(() => {
-                resizeRafPending = false;
-                alignWrapperToMessageColumn();
-            });
+            const $w = $('.acu-wrapper');
+            if (!$w.length) return;
+            const cfg = getConfig();
+            const $lastMes = $('#chat .mes').last();
+            if (!$lastMes.length) return;
+            try {
+                if (cfg.frontendPosition === 'message') {
+                    const $mesText = $lastMes.find('.mes_text').first();
+                    if ($mesText.length && $mesText.is(':visible')) {
+                        const textW = $mesText.outerWidth();
+                        if (textW > 0) $w.css({ width: textW + 'px', 'max-width': textW + 'px', 'margin-left': '0', 'margin-right': 'auto' });
+                    }
+                } else {
+                    const mesW = $lastMes.outerWidth();
+                    if (mesW > 0) $w.css({ width: mesW + 'px', 'max-width': mesW + 'px', 'margin-left': 'auto', 'margin-right': 'auto' });
+                }
+            } catch (e) { /* 对齐失败忽略 */ }
         });
-
-        // ST 的「聊天宽度」滑块改的是 --sheldWidth，既不触发 window resize
-        // 也不动 #chat 的直接子级，光靠上面两个监听会让面板卡在旧的像素宽度。
-        // 直接观察 #chat 尺寸变化补上这一类。
-        if (columnResizeObserver) { columnResizeObserver.disconnect(); columnResizeObserver = null; }
-        if ($chat.length && typeof ResizeObserver !== 'undefined') {
-            let roRafPending = false;
-            columnResizeObserver = new ResizeObserver(() => {
-                if (roRafPending) return;
-                roRafPending = true;
-                requestAnimationFrame(() => {
-                    roRafPending = false;
-                    alignWrapperToMessageColumn();
-                });
-            });
-            columnResizeObserver.observe($chat[0]);
-        }
 
         if ($chat.length) {
             // 只观察直接子级增删；消息内部渲染不再触发
@@ -3791,7 +3660,7 @@ const checkRowChanged = (realIdx, row) => {
         });
         
         const html = `
-            <div class="acu-quick-view-overlay${config.theme === 'apple' ? ' acu-theme-apple' : ''}">
+            <div class="acu-quick-view-overlay">
                 <div class="acu-quick-view-card acu-theme-${config.theme}" style="--acu-font-size: ${config.fontSize}px; font-size: ${config.fontSize}px;; --acu-text-max-height:${config.limitLongText!==false?'80px':'none'}; --acu-text-overflow:${config.limitLongText!==false?'auto':'visible'}">
                      <div class="acu-quick-view-header">
                         <span><i class="fa-solid ${getIconForTableName(tableName)}"></i> ${row[(titleColIdx !== undefined && titleColIdx !== null) ? titleColIdx : 1] || '详情'}</span>
