@@ -1,0 +1,14 @@
+# 子代理/审查临时探针文件（不属于交付物）
+_probe*
+_audit*
+_verify*
+_cleanup*
+_scope*
+_perf*
+_scan*
+_vis_*
+_*.js.tmp
+
+# 系统文件
+Thumbs.db
+.DS_Store
