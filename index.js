@@ -637,19 +637,21 @@
                 @import url('https://fonts.loli.net/css2?family=Long+Cang&family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@400;700&family=Noto+Serif+SC:wght@400;700&family=ZCOOL+KuaiLe&family=Zhi+Mang+Xing&display=swap');
 
                 /* 苹果设计主题：毛玻璃材料增强 + 降级兜底 */
-                /* 亮顶边 = 光打在材料上（Apple Materials 规范），半透明毛玻璃配合既有 backdrop-filter。
-                   注意：嵌入容器 .acu-embedded-options-container 自身带 acu-theme-apple 类（与 .acu-wrapper
-                   平级挂载），故用「.acu-theme-apple.acu-embedded-options-container」同元素组合，非后代组合。 */
                 .acu-theme-apple .acu-nav-container,
                 .acu-theme-apple .acu-data-display,
                 .acu-theme-apple.acu-embedded-options-container,
                 .acu-theme-apple.acu-embedded-options-container .acu-option-panel,
                 .acu-theme-apple.acu-embedded-options-container .acu-opt-ctrl-bar,
                 .acu-theme-apple.acu-embedded-options-container .acu-opt-content-wrapper {
-                    border-top: 1px solid rgba(255, 255, 255, 0.65) !important;
-                    border-left: 1px solid rgba(255, 255, 255, 0.4) !important;
                     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
                     backdrop-filter: blur(20px) saturate(180%) !important;
+                }
+                /* 亮顶边（光打在材料上）：只给导航栏/数据面板加；选项容器保留自身圆角 border，
+                   不在其上加亮边，避免「方形边框罩住圆角按钮」。 */
+                .acu-theme-apple .acu-nav-container,
+                .acu-theme-apple .acu-data-display {
+                    border-top: 1px solid rgba(255, 255, 255, 0.65) !important;
+                    border-left: 1px solid rgba(255, 255, 255, 0.4) !important;
                 }
                 /* 不支持 backdrop-filter 时提实背景，保证文字可读（对应 prefers-reduced-transparency 精神） */
                 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -993,6 +995,40 @@
                 .acu-edit-dialog.acu-theme-sky textarea, .acu-edit-dialog.acu-theme-sky input:not([type="checkbox"]):not([type="radio"]):not([type="color"]) { background-color: #ffffff !important; border-color: #bae6fd !important; }
                 
                 .acu-edit-dialog.acu-theme-neon textarea, .acu-edit-dialog.acu-theme-neon input:not([type="checkbox"]):not([type="radio"]):not([type="color"]) { background-color: #1a1a1a !important; border-color: #d946ef !important; color: #00ffcc !important; }
+
+                /* 苹果主题设置弹窗：毛玻璃材料化——半透明白背景 + blur，替代默认纯色面板。
+                   内联样式 background-color !important 优先级高，此处同样 !important 覆盖。 */
+                .acu-edit-dialog.acu-theme-apple {
+                    background-color: rgba(250, 250, 252, 0.55) !important;
+                    -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+                    backdrop-filter: blur(24px) saturate(180%) !important;
+                    border-top: 1px solid rgba(255, 255, 255, 0.7) !important;
+                    border-left: 1px solid rgba(255, 255, 255, 0.45) !important;
+                }
+                .acu-edit-dialog.acu-theme-apple textarea,
+                .acu-edit-dialog.acu-theme-apple input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+                .acu-edit-dialog.acu-theme-apple select {
+                    background-color: rgba(255, 255, 255, 0.6) !important;
+                    border-color: rgba(0, 0, 0, 0.08) !important;
+                    color: #1d1d1f !important;
+                }
+                .acu-edit-dialog.acu-theme-apple .acu-section-header {
+                    border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
+                }
+                /* 苹果主题 overlay（JS 已给 overlay 加 acu-theme-apple 类）：更轻压暗 + 更强模糊，
+                   让弹窗毛玻璃背景透出聊天内容而非黑幕。 */
+                .acu-edit-overlay.acu-theme-apple {
+                    background: rgba(0, 0, 0, 0.28) !important;
+                    -webkit-backdrop-filter: blur(6px) !important;
+                    backdrop-filter: blur(6px) !important;
+                }
+                /* 不支持 backdrop-filter 时设置弹窗提实背景 */
+                @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+                    .acu-edit-dialog.acu-theme-apple { background-color: #f5f5f7 !important; }
+                    .acu-edit-dialog.acu-theme-apple textarea,
+                    .acu-edit-dialog.acu-theme-apple input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+                    .acu-edit-dialog.acu-theme-apple select { background-color: #ffffff !important; }
+                }
                 
                 .acu-theme-modern .acu-opt-btn { background: var(--acu-btn-bg) !important; }
 
@@ -1467,10 +1503,9 @@
 
 
         const dialog = $(`
-            <div class="acu-edit-overlay">
+            <div class="acu-edit-overlay${config.theme === 'apple' ? ' acu-theme-apple' : ''}">
                 ${modalStyles}
-                <div class="acu-edit-dialog acu-theme-${config.theme}">
-                     <div class="acu-edit-header">
+                <div class="acu-edit-dialog acu-theme-${config.theme}">                     <div class="acu-edit-header">
                         <span style="font-size:13px; font-weight:bold;">设置选项</span>
                         <button id="dlg-close" class="acu-close-pill">完成</button>
                      </div>
@@ -3825,7 +3860,7 @@ const checkRowChanged = (realIdx, row) => {
         }).join('');
 
         const dialog = $(`
-            <div class="acu-edit-overlay">
+            <div class="acu-edit-overlay${config.theme === 'apple' ? ' acu-theme-apple' : ''}">
                 <div class="acu-edit-dialog acu-theme-${config.theme}">
                     <div class="acu-edit-title">整体编辑 (#${rowIndex + 1})</div>
                     <div class="acu-settings-content" style="flex:1; overflow-y:auto;">
@@ -3884,7 +3919,7 @@ const checkRowChanged = (realIdx, row) => {
         const { $ } = getCore();
         const config = getConfig();
         const dialog = $(`
-            <div class="acu-edit-overlay">
+            <div class="acu-edit-overlay${config.theme === 'apple' ? ' acu-theme-apple' : ''}">
                 <div class="acu-edit-dialog acu-theme-${config.theme}">
                     <div class="acu-edit-title">编辑单元格内容</div>
                     <textarea class="acu-edit-textarea">${content}</textarea>
@@ -3932,7 +3967,7 @@ const checkRowChanged = (realIdx, row) => {
         }
 
         const dialog = $(`
-            <div class="acu-edit-overlay">
+            <div class="acu-edit-overlay${config.theme === 'apple' ? ' acu-theme-apple' : ''}">
                 <div class="acu-edit-dialog acu-theme-${config.theme}" style="max-width: 400px; height: auto; max-height: 90vh; overflow: hidden;">
                     <div class="acu-edit-title" style="display:flex; justify-content:space-between; align-items:center; padding:15px;">
                         <button id="dlg-slot-reset" style="background:transparent; border:none; color:var(--acu-text-sub); cursor:pointer; font-size:12px; display:flex; align-items:center; gap:4px; padding:5px; border-radius:4px; transition:background 0.2s;">
