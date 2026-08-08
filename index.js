@@ -38,6 +38,13 @@
     let catchupLastFp = null;
     let catchupStartTs = 0;
     let catchupFallbackTimer = null;
+    // 模块级：停止追平轮询（含兜底 timer）。供 click 闭包与 CHAT_CHANGED 共用，
+    // 切聊天时必须停掉旧追平轮询，避免对新聊天误弹 toast / 误刷新（跨聊天污染）。
+    const stopCatchupPoll = () => {
+        if (catchupTimer) { clearInterval(catchupTimer); catchupTimer = null; }
+        if (catchupFallbackTimer) { clearTimeout(catchupFallbackTimer); catchupFallbackTimer = null; }
+        catchupLastFp = null;
+    };
 
     let hideOptionsUntilUpdate = false;
     let lastOptionDataCheck = '';
@@ -58,16 +65,15 @@
             // 会挡住 DB 在填表结束时发的 _notifyTableUpdate，导致表格更新了前端没刷新。
             // 填表流程的更新通知应始终放行。
             if (isEditingOrder) return;
-            // C2: 新版 DB 会把最新数据作为参数传给回调。
-            // 复用它（深拷贝）作为缓存，省去 renderInterface 内部的 exportTableAsJson 重复拉取。
-            if (incomingData && typeof incomingData === 'object') {
-                cachedTableData = cloneTableData(incomingData);
-                // renderInterface(false) 会优先用 cachedTableData，避免再打一次 DB。
-                renderInterface(false);
-            } else {
-                cachedTableData = null;
-                renderInterface(true);
-            }
+            // 通知到达 = DB 数据已更新：失效全部缓存，走 renderInterface(true) 让 getTableData(true)
+            // 从 DB 统一 clone + 重算 diffMap（若走 renderInterface(false)，getTableData(false) 缓存
+            // 命中会重置 lastTableDataRefreshed，diffMap 高亮陈旧——交叉验证确认的缺陷）。
+            // 不手动 clone incomingData：通知时 DB 已换新引用，重拉即最新，避免双 clone。
+            lastRawTableRef = null;
+            lastTableSetFingerprint = '';
+            lastTableDataRefreshed = true;
+            cachedTableData = null;
+            renderInterface(true);
         }
     };
 
@@ -1034,11 +1040,22 @@
     };
 
     // 缓存数据来源的原始引用：exportTableAsJson 返回 DB 内部 currentJsonTableData_ACU，
-    // DB 在数据合并时以不可变式替换整个对象（13 处 _set_currentJsonTableData_ACU 换新引用）。
+    // DB 在数据合并时以不可变式替换整个对象（_set_currentJsonTableData_ACU 换新引用）。
     // 引用相同 = 数据未变 → forceRefresh 时可跳过深拷贝直接复用缓存，避免高频全表 clone。
+    // ⚠ 已知例外（交叉验证确认）：DB 的 SqlTableService._ensureTablesFromTemplate 在 SQLite
+    // 缺表建表时会原地往活对象加 sheet key（引用不变但表集合变），故引用未变时仍须比对表集合。
     let lastRawTableRef = null;
     // 标记最近一次 getTableData 是否产生了新数据（引用变化 → 需要重算 diffMap）
     let lastTableDataRefreshed = false;
+    // 上次缓存的表集合指纹（sheet key 名 + 数量），用于捕获"引用不变但新增/删除了表"的建表场景
+    let lastTableSetFingerprint = '';
+
+    // 轻量表集合指纹：只列 sheet key 名与数量，成本极低
+    const tableSetFingerprint = (raw) => {
+        if (!raw || typeof raw !== 'object') return '';
+        const keys = Object.keys(raw).filter(k => k.startsWith('sheet_')).sort();
+        return keys.join(',') + '#' + keys.length;
+    };
 
     const getTableData = (forceRefresh = false) => {
         if (!forceRefresh && cachedTableData) {
@@ -1048,12 +1065,16 @@
         try {
             const api = getCore().getDB();
             const raw = api && api.exportTableAsJson ? api.exportTableAsJson() : null;
-            // 引用未变且已有缓存 → 无需深拷贝，直接复用（数据没动，clone 纯属浪费）
-            if (forceRefresh && raw === lastRawTableRef && cachedTableData) {
+            // 引用未变时仍比对表集合：DB 建表场景会原地加 sheet key（引用不变但表集合变）
+            const setFp = tableSetFingerprint(raw);
+            const setChanged = setFp !== lastTableSetFingerprint;
+            // 引用未变 + 表集合未变 + 已有缓存 → 数据确实没动，复用缓存跳过 clone
+            if (forceRefresh && raw === lastRawTableRef && !setChanged && cachedTableData) {
                 lastTableDataRefreshed = false;
                 return cachedTableData;
             }
             lastRawTableRef = raw;
+            lastTableSetFingerprint = setFp;
             lastTableDataRefreshed = true;
             // 关键：exportTableAsJson 返回的是 DB 内部 currentJsonTableData_ACU 的直接引用，
             // 必须深拷贝后再对外返回，否则前端的就地修改会绕过 DB 的事务/校验逻辑。
@@ -2190,10 +2211,24 @@ ${allTableNames.map(tName => {
                 contentHtml = renderTableContent(tables[currentTabName], currentTabName);
             }
 
-            const currentOptionStr = JSON.stringify(optionTables);
-            if (currentOptionStr !== lastOptionDataCheck) {
+            // 选项表变化检测：用轻量摘要替代全量 JSON.stringify（选项表结构 {key,headers,rows}）。
+            // 按 headers 长度全列投影（选项表列数少，全列成本低），避免前 12 列截断漏检 13+ 列变化。
+            const optionStr = optionTables.map(ot => {
+                const hdrArr = Array.isArray(ot?.headers) ? ot.headers : [];
+                const h = hdrArr.join(',');
+                const rowsArr = Array.isArray(ot?.rows) ? ot.rows : [];
+                const rs = rowsArr.map(r => {
+                    if (!Array.isArray(r)) return '';
+                    const cl = hdrArr.length || r.length; // 按表头列数投影；无表头时按行长度
+                    let s = '';
+                    for (let cc = 0; cc < cl; cc++) s += (r[cc] ?? '') + '|';
+                    return s;
+                }).join(';');
+                return h + '@' + rowsArr.length + ':' + rs;
+            }).join('~');
+            if (optionStr !== lastOptionDataCheck) {
                 hideOptionsUntilUpdate = false;
-                lastOptionDataCheck = currentOptionStr;
+                lastOptionDataCheck = optionStr;
             }
 
             let optionBtnContent = '';
@@ -3333,17 +3368,14 @@ const checkRowChanged = (realIdx, row) => {
                 const CATCHUP_STABLE_N = 3;
                 const CATCHUP_MAX_MS = 10 * 60 * 1000; // 10 分钟硬上限
                 const apiDB = core.getDB();
-                const stopCatchupPoll = () => {
-                    if (catchupTimer) { clearInterval(catchupTimer); catchupTimer = null; }
-                    if (catchupFallbackTimer) { clearTimeout(catchupFallbackTimer); catchupFallbackTimer = null; }
-                    catchupLastFp = null;
-                };
+                // stopCatchupPoll 为模块级定义（见 IIFE 顶层），此处直接引用
                 const finishCatchup = (saved) => {
                     if (!catchupTimer) return; // 已结束（幂等守卫）
                     stopCatchupPoll();
                     // 追平结束：清缓存 + 强制重拉 + 重渲染（含选项表），并把当前态存为新基线
                     cachedTableData = null;
                     lastRawTableRef = null;
+                    lastTableSetFingerprint = '';
                     currentDiffMap.clear();
                     try { const d = getTableData(true); if (d) saveSnapshot(d); } catch (_) {}
                     try { renderInterface(true); } catch (_) {}
@@ -4064,14 +4096,15 @@ const checkRowChanged = (realIdx, row) => {
                 try { rawRef = api.exportTableAsJson(); } catch (_) { rawRef = null; }
                 const fp = lightFingerprint(rawRef);
                 if (fillPollLastFingerprint !== null && fp !== fillPollLastFingerprint) {
-                    // 数据变了：填表仍在进行或有新写入 → 刷新并重置稳定计数
+                    // 数据变了：填表仍在进行或有新写入 → 失效引用缓存并强制刷新。
+                    // 不在此 clone：renderInterface(true) 内部 getTableData(true) 会统一 clone 一次，
+                    // 避免轮询 clone + 渲染 clone 双份全表深拷贝。
                     fillPollStable = 0;
-                    let fresh = null;
-                    try { fresh = cloneTableData(rawRef); } catch (_) { fresh = null; }
-                    if (fresh) {
-                        cachedTableData = fresh;
-                        renderInterface(true);
-                    }
+                    cachedTableData = null;
+                    lastRawTableRef = null;
+                    lastTableSetFingerprint = '';
+                    lastTableDataRefreshed = true;
+                    renderInterface(true);
                 } else {
                     fillPollStable++;
                     if (fillPollStable >= POLL_STABLE_THRESHOLD) {
@@ -4114,7 +4147,10 @@ const checkRowChanged = (realIdx, row) => {
                      if (evSrc && typeof evSrc.on === 'function' && evTypes && evTypes.CHAT_CHANGED) {
                          evSrc.on(evTypes.CHAT_CHANGED, () => {
                              stopFillPoll();
+                             stopCatchupPoll(); // 切聊天停掉旧追平轮询，防跨聊天误刷新/误 toast
                              cachedTableData = null;
+                             lastRawTableRef = null;
+                             lastTableSetFingerprint = '';
                              memorySnapshot_ACU = null;
                              try { localStorage.removeItem(STORAGE_KEY_LAST_SNAPSHOT); } catch (_) {}
                              currentDiffMap.clear();
