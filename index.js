@@ -3075,9 +3075,7 @@ ${allTableNames.map(tName => {
     //
     // 注意：选项容器的样式表规则带 !important（见 .acu-embedded-options-container），
     // 普通内联样式压不过它，必须用 setProperty 的 important 优先级写入。
-    // inset：两侧各内缩多少 px。嵌入式仪表盘/选项是主面板的附属块，
-    // 与主面板齐宽会显得呆板，内缩一点做出层次。
-    const alignPanelToMessageColumn = ($panel, column, inset = 0) => {
+    const alignPanelToMessageColumn = ($panel, column) => {
         if (!$panel || !$panel.length || !column) return;
         const { box, contentBox } = column;
         try {
@@ -3085,15 +3083,8 @@ ${allTableNames.map(tName => {
             const parentEl = el && el.parentElement;
             if (!parentEl) return;
             const parent = contentBox(parentEl);
-            // 窄屏别硬缩：内缩后至少留 240px 可用宽。
-            // 注意是「夹住」不是「归零」——早前写成不够就 pad=0，会在列宽 260px 处
-            // 突跳 19.5px，而且更宽的列反而得到更窄的面板（非单调）。实测该阈值
-            // 正好落在 375px 和 390px 两种常见手机之间，拖窗宽跨过去会看到面板抽动。
-            const pad = inset > 0
-                ? Math.max(0, Math.min(inset, Math.floor((box.width - 240) / 2)))
-                : 0;
-            const width = (box.width - pad * 2) + 'px';
-            const marginLeft = (box.left - parent.left + pad) + 'px';
+            const width = box.width + 'px';
+            const marginLeft = (box.left - parent.left) + 'px';
             el.style.setProperty('width', width, 'important');
             el.style.setProperty('max-width', width, 'important');
             el.style.setProperty('margin-left', marginLeft, 'important');
@@ -3107,26 +3098,15 @@ ${allTableNames.map(tName => {
 
     // 三个面板都注入在同一个 .mes_block 里（wrapper / 嵌入仪表盘 / 嵌入选项），
     // 只对齐其中一个会让它们右缘参差，所以统一在这里一起对齐。
-    //
-    // 主面板对齐正文列满宽；嵌入的仪表盘/选项两侧各内缩一点——它们是主面板的
-    // 附属块，齐宽会显得跟主面板平级、整屏一根笔直的边，缩进后层次清楚。
-    // 内缩量取正文列宽的 3%，夹在 10~28px：宽屏不至于缩太多，窄屏不至于没效果。
-    const EMBED_INSET_RATIO = 0.03;
-    const EMBED_INSET_MIN = 10;
-    const EMBED_INSET_MAX = 28;
     const alignWrapperToMessageColumn = () => {
         const { $ } = getCore();
         const $mes = getMeasurableMes();
         if (!$mes) return;
         const column = getMessageColumnBox($mes);
         if (!column) return;
-        const inset = Math.round(Math.min(
-            EMBED_INSET_MAX,
-            Math.max(EMBED_INSET_MIN, column.box.width * EMBED_INSET_RATIO)
-        ));
         alignPanelToMessageColumn($('.acu-wrapper'), column);
-        alignPanelToMessageColumn($('.acu-embedded-dashboard-container'), column, inset);
-        alignPanelToMessageColumn($('.acu-embedded-options-container'), column, inset);
+        alignPanelToMessageColumn($('.acu-embedded-dashboard-container'), column);
+        alignPanelToMessageColumn($('.acu-embedded-options-container'), column);
     };
 
     const insertHtmlToPage = (html) => {
