@@ -636,6 +636,25 @@
                 /* 国内镜像字体源，无需VPN */
                 @import url('https://fonts.loli.net/css2?family=Long+Cang&family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@400;700&family=Noto+Serif+SC:wght@400;700&family=ZCOOL+KuaiLe&family=Zhi+Mang+Xing&display=swap');
 
+                /* 选项面板容器：脱离父级（ST 消息块 .mes_block）的 flex/对齐影响，避免窄屏/平板上被右靠。
+                   注意：display 不加 !important，否则会压掉 jQuery .hide() 的内联 display:none（发送后隐藏面板）。 */
+                .acu-embedded-options-container {
+                    display: block;
+                    flex: 0 0 auto !important;
+                    width: 100% !important;
+                    max-width: 100% !important;
+                    margin-left: 0 !important;
+                    margin-right: auto !important;
+                    box-sizing: border-box !important;
+                }
+                /* 窄屏（≤480px 手机）才单列；iPad 竖屏（768px）保留 3 列居中，避免整行右靠 */
+                @media (max-width: 480px) {
+                    .acu-embedded-options-container .acu-opt-btn {
+                        width: 100% !important;
+                        flex: 0 0 100% !important;
+                        max-width: 100% !important;
+                    }
+                }
                 /* 苹果设计主题：毛玻璃材料增强 + 降级兜底 */
                 .acu-theme-apple .acu-nav-container,
                 .acu-theme-apple .acu-data-display,
@@ -961,14 +980,6 @@
                          border-radius: 8px !important;
                          background: var(--acu-btn-bg);
                          margin: 0 !important;
-                    }
-                    .acu-option-panel {
-                         /* 窄屏仍单列 */
-                    }
-                    .acu-opt-btn {
-                         width: 100% !important;
-                         flex: 0 0 100% !important;
-                         max-width: 100% !important;
                     }
                     .acu-opt-btn {
                          white-space: normal !important;
