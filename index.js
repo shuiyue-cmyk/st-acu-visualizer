@@ -2694,17 +2694,23 @@ ${allTableNames.map(tName => {
              if ($lastMes.length) {
                  const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
                  $targetBlock.append($newContent);
+                 // message 模式：对齐消息正文列宽度（.mes_text 比 .mes_block 窄，
+                 // 右侧有 --mes-right-spacing 留白；wrapper 撑满 .mes_block 会右溢贴边）。
+                 try {
+                     const $mesText = $lastMes.find('.mes_text').first();
+                     if ($mesText.length && $mesText.is(':visible')) {
+                         const textW = $mesText.outerWidth();
+                         if (textW > 0) {
+                             $newContent.css({ width: textW + 'px', 'max-width': textW + 'px', 'margin-left': '0', 'margin-right': 'auto' });
+                         }
+                     }
+                 } catch (e) { console.warn('[ACU-UI] 消息正文对齐失败:', e); }
              } else {
                  if ($chat.length) $chat.append($newContent); else $('body').append($newContent);
              }
         } else {
             if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
-        }
-
-        // 对齐消息列：前端面板撑满 #chat 会右缘贴边（消息正文列居中，面板右侧溢出）。
-        // 仅 bottom 模式（wrapper 挂 #chat 尾部）执行；message 模式挂消息块内天然对齐，跳过。
-        // 运行时测量最近一条 .mes 的实际宽度，把 wrapper 设成同宽并水平居中。
-        if (config.frontendPosition !== 'message') {
+            // bottom 模式：对齐消息列宽度
             try {
                 const $lastMes = $chat.find('.mes').last();
                 if ($lastMes.length && $newContent.length) {
@@ -2738,6 +2744,16 @@ ${allTableNames.map(tName => {
                         } else if ($targetBlock.children().last()[0] !== $wrapper[0]) {
                             $targetBlock.append($wrapper);
                         }
+                        // message 模式：对齐消息正文列宽度（.mes_text 有右侧留白，wrapper 撑满 .mes_block 会右溢）
+                        try {
+                            const $mesText = $lastMes.find('.mes_text').first();
+                            if ($mesText.length && $mesText.is(':visible') && $wrapper.length) {
+                                const textW = $mesText.outerWidth();
+                                if (textW > 0) {
+                                    $wrapper.css({ width: textW + 'px', 'max-width': textW + 'px', 'margin-left': '0', 'margin-right': 'auto' });
+                                }
+                            }
+                        } catch (e) { /* 对齐失败忽略 */ }
                     }
                 } else {
                     const children = $chatNode.children();
@@ -2764,6 +2780,27 @@ ${allTableNames.map(tName => {
         };
         if (observer) observer.disconnect();
         observer = new MutationObserver(handleChatMutation);
+
+        // 窗口 resize / 转屏后消息列宽度变化，复用对齐逻辑防重新贴边
+        $(window).off('resize.acu_align').on('resize.acu_align', () => {
+            const $w = $('.acu-wrapper');
+            if (!$w.length) return;
+            const cfg = getConfig();
+            const $lastMes = $('#chat .mes').last();
+            if (!$lastMes.length) return;
+            try {
+                if (cfg.frontendPosition === 'message') {
+                    const $mesText = $lastMes.find('.mes_text').first();
+                    if ($mesText.length && $mesText.is(':visible')) {
+                        const textW = $mesText.outerWidth();
+                        if (textW > 0) $w.css({ width: textW + 'px', 'max-width': textW + 'px', 'margin-left': '0', 'margin-right': 'auto' });
+                    }
+                } else {
+                    const mesW = $lastMes.outerWidth();
+                    if (mesW > 0) $w.css({ width: mesW + 'px', 'max-width': mesW + 'px', 'margin-left': 'auto', 'margin-right': 'auto' });
+                }
+            } catch (e) { /* 对齐失败忽略 */ }
+        });
 
         if ($chat.length) {
             // 只观察直接子级增删；消息内部渲染不再触发
