@@ -3085,7 +3085,7 @@ const checkRowChanged = (realIdx, row) => {
              });
 
             $('.acu-height-drag-handle').off('pointerdown').on('pointerdown', function(e) {
-                if (e.button !== 0) return;
+                if (e.button !== 0 || isEditingOrder) return; // 排序模式下不响应高度拖拽
                 e.preventDefault(); e.stopPropagation();
                 const handle = this;
                 handle.setPointerCapture(e.pointerId);
@@ -3123,6 +3123,7 @@ const checkRowChanged = (realIdx, row) => {
             });
             
             $('.acu-panel-header').off('dblclick').on('dblclick', function(e) {
+                if (isEditingOrder) return; // 排序模式下不响应双击重置高度
                 if ($(e.target).closest('button, input, .acu-height-drag-handle, .acu-search-wrapper').length) return;
                 e.preventDefault(); e.stopPropagation();
                 
@@ -3173,22 +3174,35 @@ const checkRowChanged = (realIdx, row) => {
                             group[parts[0]].push(parseInt(parts[1]));
                         }
                     }
+                    let failedRows = 0;
+                    let failedTableNames = [];
                     for (const t in group) {
                         const rows = group[t].sort((a,b) => b - a);
-                        for (const r of rows) await api.deleteRow(t, r + 1);
+                        for (const r of rows) {
+                            try {
+                                const res = await api.deleteRow(t, r + 1);
+                                // DB 8.9 deleteRow 只返回 true/false；放宽为 res !== true 防御未来返回 -1 等
+                                if (res !== true) { failedRows++; if (!failedTableNames.includes(t)) failedTableNames.push(t); }
+                            } catch (e) { failedRows++; if (!failedTableNames.includes(t)) failedTableNames.push(t); console.warn('[ACU-API] deleteRow 失败:', e); }
+                        }
                     }
                     pendingDeletes.clear();
                     isMultiSelectMode = false;
                     selectedRows.clear();
-                    if (window.toastr) window.toastr.success('删除成功');
+                    if (window.toastr) {
+                        if (failedRows === 0) window.toastr.success('删除成功');
+                        else window.toastr.warning(`删除部分完成：${failedRows} 行失败（${failedTableNames.join('、') || '未知表'}），请检查数据库状态。`);
+                    }
                     cachedTableData = null;
+                    lastRawTableRef = null;
+                    lastTableSetFingerprint = '';
                     renderInterface(true);
                 } else {
                     cachedTableData = null; const _d = getTableData(true); if(_d) saveSnapshot(_d); currentDiffMap.clear(); renderInterface(true); if (window.toastr) window.toastr.info('已刷新');
                 }
             });
 
-            $('#acu-btn-dash-edit, #acu-btn-dash-edit-emb').off('click').on('click', (e) => { e.stopPropagation(); isDashEditing = !isDashEditing; renderInterface(false); });
+            $('#acu-btn-dash-edit, #acu-btn-dash-edit-emb').off('click').on('click', (e) => { e.stopPropagation(); if (isEditingOrder) return; isDashEditing = !isDashEditing; renderInterface(false); });
             $('.acu-slot-setting-btn').off('click').on('click', function(e) { e.stopPropagation(); showDashSlotSettings($(this).data('slot')); });
 
               
@@ -3668,15 +3682,25 @@ const checkRowChanged = (realIdx, row) => {
                 $displayTarget.addClass('acu-highlight-changed');
 
                 const rawData = getTableData();
-                if (rawData && rawData[tableKey]?.content[rowIdx + 1]) { 
+                if (rawData && rawData[tableKey]?.content[rowIdx + 1]) {
+                      const oldVal = rawData[tableKey].content[rowIdx + 1][colIdx];
                       rawData[tableKey].content[rowIdx + 1][colIdx] = newVal;
-                    await saveDataToDatabase(rawData, true, false, {
-                        type: 'cell_edit',
-                        tableName: tableName,
-                        rowIndex: rowIdx,
-                        colIndex: colIdx,
-                        newValue: newVal
-                    });
+                      const ok = await saveDataToDatabase(rawData, true, false, {
+                          type: 'cell_edit',
+                          tableName: tableName,
+                          rowIndex: rowIdx,
+                          colIndex: colIdx,
+                          newValue: newVal
+                      });
+                      if (ok === false) {
+                          // 保存失败：回滚缓存单元格并强制重拉渲染，防止显示与 DB 持久分歧
+                          try { rawData[tableKey].content[rowIdx + 1][colIdx] = oldVal; } catch (_) {}
+                          cachedTableData = null;
+                          lastRawTableRef = null;
+                          lastTableSetFingerprint = '';
+                          renderInterface(true);
+                          if (window.toastr) window.toastr.error('保存失败，已回滚并刷新。');
+                      }
                 } 
             });
         });
@@ -3707,10 +3731,10 @@ const checkRowChanged = (realIdx, row) => {
                     }
                 } catch (e) { console.warn('[ACU-API] insertRow 调用失败:', e); ok = false; }
                 // 兜底：旧版 DB 无 insertRow 或调用失败时退回全量保存，但绝不伪造 row_id。
+                // 位置语义对齐 DB insertRow（始终表尾 push）：兜底也 push 到表尾，而非菜单所在行后。
                 if (!ok) {
                     const newRow = headers.map(() => '');
-                    // 仅在非 SQLite（无 API 可探测 storageMode）时保留旧行为，但仍不写主键列。
-                    sheet.content.splice(rowIdx + 2, 0, newRow);
+                    sheet.content.push(newRow);
                     await saveDataToDatabase(rawData, false, true);
                 } else {
                     // 成功路径：让 DB 的更新回调驱动刷新，无需手动 render。
