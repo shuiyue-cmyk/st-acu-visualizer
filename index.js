@@ -2145,7 +2145,7 @@ ${allTableNames.map(tName => {
                         backdrop-filter: blur(5px);
                         ${contentStyle}
                     ">
-                        <div class="acu-option-panel" style="display: flex; flex-wrap: wrap; justify-content: center; padding: 0; border: none; background: transparent; box-shadow: none; margin: 0;">
+                        <div class="acu-option-panel" style="display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 0; border: none; background: transparent; box-shadow: none; margin: 0;">
                             ${htmlContent}
                         </div>
                     </div>
