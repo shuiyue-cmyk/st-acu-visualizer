@@ -2701,6 +2701,21 @@ ${allTableNames.map(tName => {
             if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
         }
 
+        // 对齐消息列：前端面板撑满 #chat 会右缘贴边（消息正文列居中，面板右侧溢出）。
+        // 仅 bottom 模式（wrapper 挂 #chat 尾部）执行；message 模式挂消息块内天然对齐，跳过。
+        // 运行时测量最近一条 .mes 的实际宽度，把 wrapper 设成同宽并水平居中。
+        if (config.frontendPosition !== 'message') {
+            try {
+                const $lastMes = $chat.find('.mes').last();
+                if ($lastMes.length && $newContent.length) {
+                    const mesW = $lastMes.outerWidth();
+                    if (mesW > 0) {
+                        $newContent.css({ width: mesW + 'px', 'max-width': mesW + 'px', 'margin-left': 'auto', 'margin-right': 'auto' });
+                    }
+                }
+            } catch (e) { console.warn('[ACU-UI] 消息列对齐失败，保持原宽度:', e); }
+        }
+
         // 优化：去掉 subtree 监听，只观察 #chat 直接子级增删（新 .mes 是 #chat 直接子元素）。
         // 原 subtree:true 会监听消息内部深层渲染（swipe/代码块展开等）触发大量无意义回调。
         // 再加节流：批量增删时只处理最后一次，避免高频 jQuery 查找。
@@ -2731,6 +2746,18 @@ ${allTableNames.map(tName => {
                         if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
                             $chatNode.append($wrapper);
                         }
+                    }
+                    // bottom 模式：消息增删/resize 后重新对齐 wrapper 到消息列宽度
+                    if (currentConfig.frontendPosition !== 'message') {
+                        try {
+                            const $lastMes = $chatNode.find('.mes').last();
+                            if ($lastMes.length && $wrapper.length) {
+                                const mesW = $lastMes.outerWidth();
+                                if (mesW > 0) {
+                                    $wrapper.css({ width: mesW + 'px', 'max-width': mesW + 'px', 'margin-left': 'auto', 'margin-right': 'auto' });
+                                }
+                            }
+                        } catch (e) { /* 对齐失败忽略 */ }
                     }
                 }
             });
