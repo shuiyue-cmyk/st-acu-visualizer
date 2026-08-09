@@ -372,24 +372,23 @@
                 const glassHighlight = isClear
                     ? 'linear-gradient(155deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.35) 18%, rgba(255,255,255,0) 38%)'
                     : 'none';
-                // 液体玻璃(clear)底层 = 纯 liquid glass 材质:斜向扫光 + 半透明白底,
-                // 完全透出宿主(酒馆界面)内容——无色(用户指令:液体玻璃不要颜色,
-                // 「液体怎么会有颜色呢」)。文字用中性深灰,不用 color-mix 主色调混色;
-                // 面板纯半透明白,不用主色调 tint。既符合「液体无色」又减合成负载。
-                // shell 底色近实色(0.92):全屏 shell 不 blur(见 blur 规则注释,全屏
-                // backdrop-filter 是卡顿根因),近实色盖住底下酒馆文字避免清晰透出混乱;
-                // 玻璃质感由侧栏/面板/弹窗局部承担(Apple liquid glass 正解:玻璃是
-                // 局部控件材质,整屏背景是实色)。
+                // 液体玻璃(clear)按 Apple liquid glass 完全实现:整屏玻璃半透明透出
+                // 宿主酒馆——用户拍板「按苹果的来,明确告知性能开销大」。所以 shell
+                // 全屏 backdrop blur(真液体感,代价是 GPU 全屏模糊,低配机卡顿已在
+                // 设置界面标注)。无色(用户:「液体怎么会有颜色呢」),文字中性深灰。
+                // 白度 0.55:黑底宿主演化下 0.45 白会显深灰(kimi 打回「偏暗亚克力」),
+                // 0.55 更亮但仍透出酒馆朦胧;内容区另加局部 blur+更白(0.85)保证数据
+                // 区清爽可读(明亮磨砂质感)。
                 const bg0 = isClear
-                    ? `${glassHighlight}, rgba(255, 255, 255, 0.92)`
+                    ? `${glassHighlight}, rgba(255, 255, 255, 0.55)`
                     : 'rgba(244, 244, 247, 0.92)';
-                const bg1 = isClear ? 'rgba(255, 255, 255, 0.8)' : 'rgba(250, 250, 252, 0.75)';
-                const bg2 = isClear ? 'rgba(255, 255, 255, 0.6)' : 'rgba(226, 226, 232, 0.5)';
-                const sidebarBg = isClear ? 'rgba(255, 255, 255, 0.75)' : 'rgba(246, 246, 248, 0.55)';
-                const panelBg = isClear ? 'rgba(255, 255, 255, 0.85)' : 'rgba(255, 255, 255, 0.72)';
-                const floatBg = isClear ? 'rgba(255, 255, 255, 0.88)' : 'rgba(255, 255, 255, 0.75)';
-                // 液体玻璃无色:blur 与 apple 同级(20px/180%)避免全屏 backdrop 过重
-                // (24px/220% 实机卡顿);苹果毛玻璃保持 20px/180%。
+                const bg1 = isClear ? 'rgba(255, 255, 255, 0.75)' : 'rgba(250, 250, 252, 0.75)';
+                const bg2 = isClear ? 'rgba(255, 255, 255, 0.55)' : 'rgba(226, 226, 232, 0.5)';
+                const sidebarBg = isClear ? 'rgba(255, 255, 255, 0.5)' : 'rgba(246, 246, 248, 0.55)';
+                const panelBg = isClear ? 'rgba(255, 255, 255, 0.88)' : 'rgba(255, 255, 255, 0.72)';
+                const floatBg = isClear ? 'rgba(255, 255, 255, 0.9)' : 'rgba(255, 255, 255, 0.75)';
+                // 液体玻璃性能开销大(全屏 blur):blur 20px/180%,与 apple 同级;
+                // apple 毛玻璃 shell 近实色不 blur,性能友好。
                 const blurPx = '20px';
                 const sat = '180%';
                 const borderTop = isClear ? 'rgba(255, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.7)';
@@ -476,24 +475,45 @@
                             --acu-radius-sm: 8px !important;
                             --acu-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06) !important;
                         }
-                        /* 毛玻璃只给局部浮层(弹层遮罩/移动导航)。子元素零 backdrop-filter:
+                        /* 毛玻璃只给局部元素(弹层遮罩/移动导航 + 液体玻璃的导航区)。
                            每加一个就是多一个合成层 + 一次对背景的高斯模糊。
-                           ⚠️ 全屏 shell(.acu-v2-app__shell 是 fixed inset:0 覆盖整个视口)
-                           绝不加 backdrop-filter——整屏每帧高斯模糊是性能灾难,实机卡顿
-                           (用户反馈:液体玻璃/毛玻璃打开数据库界面都卡)。shell 用纯半透明
-                           底透出酒馆,玻璃质感由面板实底 + 弹窗局部 blur 承担。 */
+                           ⚠️ 全屏 shell 加 backdrop-filter = 整屏每帧高斯模糊,GPU 重负载。
+                           这是用户已知的取舍:液体玻璃(clear)按 Apple liquid glass 完全
+                           实现,shell 全屏 blur 透出酒馆(性能开销大,设置界面已标注);
+                           苹果毛玻璃(apple)shell 近实色不 blur,性能友好。
+                           两者都保留局部弹层 blur。 */
                         #acu-app-v2 .acu-dialog-layer,
                         #acu-app-v2 .acu-v2-drawer-layer,
                         #acu-app-v2 .acu-v2-app__mobile-nav-layer {
                             -webkit-backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
                             backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
                         }
-                        /* shell 半透明底透宿主:不 blur(全屏模糊太贵),视觉上靠底下
-                           酒馆自然透出 + 面板/弹窗的局部玻璃形成层次 */
+                        /* 液体玻璃:shell 全屏 blur(真液体玻璃,整屏透出酒馆);
+                           苹果毛玻璃:shell 不 blur。 */
+                        ${isClear ? `
+                        #acu-app-v2 .acu-v2-app__shell {
+                            -webkit-backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
+                            backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
+                        }` : `
                         #acu-app-v2 .acu-v2-app__shell {
                             -webkit-backdrop-filter: none !important;
                             backdrop-filter: none !important;
+                        }`}
+                        /* 液体玻璃:侧栏/顶栏再叠一层局部玻璃,导航区更透(浮在 glass 层) */
+                        ${isClear ? `
+                        #acu-app-v2 .acu-v2-sidebar--desktop,
+                        #acu-app-v2 .acu-v2-app__header {
+                            -webkit-backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
+                            backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
+                            background: rgba(255, 255, 255, 0.4) !important;
                         }
+                        /* 液体玻璃:内容区再叠一层局部 blur + 更白——数据区明亮清爽
+                           (Apple 明亮磨砂感,kimi 打回「偏暗亚克力」后加) */
+                        #acu-app-v2 .acu-v2-app__content {
+                            -webkit-backdrop-filter: blur(16px) saturate(160%) !important;
+                            backdrop-filter: blur(16px) saturate(160%) !important;
+                            background: rgba(255, 255, 255, 0.85) !important;
+                        }` : ''}
                         /* 亮顶边(光打在材料上):苹果风补全,液体玻璃淡一档 */
                         #acu-app-v2 .acu-v2-app__shell,
                         #acu-app-v2 .acu-dialog,
@@ -558,7 +578,8 @@
                             #acu-app-v2 .acu-v2-drawer-layer,
                             #acu-app-v2 .acu-v2-app__mobile-nav-layer,
                             #acu-app-v2 .acu-v2-sidebar--desktop,
-                            #acu-app-v2 .acu-v2-app__header {
+                            #acu-app-v2 .acu-v2-app__header,
+                            #acu-app-v2 .acu-v2-app__content {
                                 /* 两风格 shell 都是半透明底,无 blur 时必须提实(#f5f5f7)保证可读 */
                                 background: #f5f5f7 !important;
                                 -webkit-backdrop-filter: none !important;
@@ -578,7 +599,8 @@
                             #acu-app-v2 .acu-v2-drawer-layer,
                             #acu-app-v2 .acu-v2-app__mobile-nav-layer,
                             #acu-app-v2 .acu-v2-sidebar--desktop,
-                            #acu-app-v2 .acu-v2-app__header {
+                            #acu-app-v2 .acu-v2-app__header,
+                            #acu-app-v2 .acu-v2-app__content {
                                 background: #f5f5f7 !important;
                                 -webkit-backdrop-filter: none !important;
                                 backdrop-filter: none !important;
@@ -1937,8 +1959,9 @@
                                     <select id="cfg-db-style" class="acu-nice-select">
                                         <option value="off" ${(config.dbStyle === 'off' && !config.dbAppleGlass) ? 'selected' : ''}>关闭(默认)</option>
                                         <option value="apple" ${(config.dbStyle === 'apple' || (config.dbAppleGlass && config.dbStyle === 'off')) ? 'selected' : ''}>苹果毛玻璃</option>
-                                        <option value="clear" ${config.dbStyle === 'clear' ? 'selected' : ''}>液体玻璃</option>
+                                        <option value="clear" ${config.dbStyle === 'clear' ? 'selected' : ''}>液体玻璃 ⚠️性能开销大</option>
                                     </select>
+                                    <div style="font-size:11px; color:var(--acu-text-sub, #888); margin-top:2px;">液体玻璃按 Apple 全屏透明渲染,低配置设备可能明显卡顿;苹果毛玻璃性能友好。</div>
                                 </div>
                             </div>
                             <div class="acu-control-row" id="row-db-accent" style="display:${(config.dbStyle === 'apple' || (config.dbAppleGlass && config.dbStyle === 'off')) ? 'flex' : 'none'}">
