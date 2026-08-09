@@ -364,8 +364,19 @@
                 // 画布垫底,上面滴几滴主色调颜料(radial-gradient),边缘自然模糊晕开,
                 // 像颜料滴在湿纸上洇开的柔和感(用户反馈:线性渐变太生硬);
                 // 面板/侧栏/表格半透明白透出底层晕染,形成玻璃剥离层次。
+                // ── Apple liquid glass 材质:镜面反射高光(specular highlight) ──
+                // 参考 apple-skills ios-liquid-glass:玻璃「blur 背后 + 反射周围色彩和光 +
+                // 镜面高光」。斜向光带用 background 多层渐变叠加(从亮到透明,不挡内容、
+                // 不碰 ::before/::after 伪元素,避免与 DB 组件冲突)。kimi 复审:光带
+                // 只覆盖顶部 38%(0.85 起步快速衰减),不延伸到正文区——黑底宿主下扫光
+                // 若覆盖右下半部会压暗深色文字、干扰阅读(kimi 黑底复审打回后收窄);
+                // 面板底色带主色调 tint(两端不透明)给白色光带制造对比。
+                const glassHighlight = isClear
+                    ? 'linear-gradient(155deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.35) 18%, rgba(255,255,255,0) 38%)'
+                    : 'none';
                 const bg0 = isClear
-                    ? `radial-gradient(ellipse 42% 34% at 18% 22%, ${accent.accent}38 0%, transparent 72%),
+                    ? `${glassHighlight},
+                       radial-gradient(ellipse 42% 34% at 18% 22%, ${accent.accent}38 0%, transparent 72%),
                        radial-gradient(ellipse 34% 28% at 82% 18%, ${accent.accent2}2e 0%, transparent 72%),
                        radial-gradient(ellipse 38% 30% at 70% 86%, ${accent.accent}33 0%, transparent 72%),
                        radial-gradient(ellipse 28% 24% at 20% 82%, ${accent.accent2}26 0%, transparent 72%),
@@ -378,8 +389,22 @@
                 const panelBg = isClear ? 'rgba(255, 255, 255, 0.85)' : 'rgba(255, 255, 255, 0.72)';
                 const floatBg = isClear ? 'rgba(255, 255, 255, 0.88)' : 'rgba(255, 255, 255, 0.75)';
                 const blurPx = isClear ? '24px' : '20px';
-                const sat = isClear ? '200%' : '180%';
+                const sat = isClear ? '220%' : '180%';
                 const borderTop = isClear ? 'rgba(255, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.7)';
+                // 面板底:clear 时从纯白改为「白→主色调混白浅色」渐变。右端必须不透明
+                // (color-mix 混出的浅主色调),不能像之前 #007aff14 那样 8% alpha——
+                // 那会让面板右半边透出黑底、深色文字对比度崩溃(kimi 黑底复审打回)。
+                // 左白右浅主色调,两端都实,给白色扫光制造对比又不影响正文可读。
+                const panelBgTint = isClear
+                    ? `linear-gradient(160deg, rgba(255,255,255,0.88) 0%, color-mix(in srgb, ${accent.accent} 16%, #f5f5f7) 100%)`
+                    : panelBg;
+                // 面板镜面高光 + 顶部内高光 + 边缘玻璃厚度
+                const panelHighlight = isClear
+                    ? 'box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), inset 0 0 0 1px rgba(255,255,255,0.18), 0 6px 18px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.05) !important;'
+                    : 'box-shadow: 0 6px 18px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.05) !important;';
+                const floatHighlight = isClear
+                    ? 'box-shadow: inset 0 1px 0 rgba(255,255,255,0.75), inset 0 0 0 1px rgba(255,255,255,0.2), 0 16px 48px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08) !important;'
+                    : 'box-shadow: 0 16px 48px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08) !important;';
                 const css = `
                     <style id="acu-v2-glass">
                         /* ${isClear ? '透明玻璃' : '苹果毛玻璃'}材料 token(全 !important 压 DB 侧 applyTheme 重写) */
@@ -430,20 +455,24 @@
                         }
                         #acu-app-v2 .acu-v2-sidebar--desktop { border-right: 1px solid rgba(255, 255, 255, 0.4) !important; }
                         #acu-app-v2 .acu-v2-app__header { border-bottom: 1px solid rgba(255, 255, 255, 0.45) !important; }
+                        /* 镜面反射高光:面板/浮层的斜向光带已在各自 background 里拼接
+                           (多层渐变,不碰 shell——shell 的 background 是 DB 用
+                           var(--acu-bg-0) 消费,覆盖 background-image 会把颜料滴渐变
+                           一起盖掉)。shell 保留亮顶边 + bg0 颜料滴即可。 */
                         /* 内层面板:比 shell 实一档但保持可见透明,让 shell 的模糊
-                           透出来形成玻璃感;柔和投影从 shell 上浮起 */
+                           透出来形成玻璃感;clear 时叠加斜向光带 + 内反光(玻璃厚度) */
                         #acu-app-v2 .acu-panel,
                         #acu-app-v2 .acu-v2-app__theme-menu {
-                            background: ${panelBg} !important;
+                            background: ${glassHighlight !== 'none' ? `${glassHighlight}, ` : ''}${panelBgTint} !important;
                             -webkit-backdrop-filter: none !important;
                             backdrop-filter: none !important;
-                            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+                            ${panelHighlight}
                         }
                         /* 浮层:半透明保持玻璃感,投影更深压住遮罩 */
                         #acu-app-v2 .acu-dialog,
                         #acu-app-v2 .acu-v2-drawer {
-                            background: ${floatBg} !important;
-                            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+                            background: ${glassHighlight !== 'none' ? `${glassHighlight}, ` : ''}${floatBg} !important;
+                            ${floatHighlight}
                         }
                         /* 表格:表头加极淡底与 shell 区分,行分隔线用淡灰(不再是隐形白边) */
                         #acu-app-v2 .acu-v2-form-fill-page__table-wrap th {
@@ -455,8 +484,8 @@
                         }
                         /* 仪表盘健康卡:面板同款浮起 */
                         #acu-app-v2 .acu-dashboard-page__health-item {
-                            background: ${panelBg} !important;
-                            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07) !important;
+                            background: ${glassHighlight !== 'none' ? `${glassHighlight}, ` : ''}${panelBgTint} !important;
+                            ${isClear ? 'box-shadow: inset 0 1px 0 rgba(255,255,255,0.6), inset 0 0 0 1px rgba(255,255,255,0.18), 0 2px 8px rgba(0,0,0,0.07) !important;' : 'box-shadow: 0 2px 8px rgba(0,0,0,0.07) !important;'}
                         }
                         /* 弹层遮罩轻压暗 + 模糊,替掉 DB 默认纯色压暗 */
                         #acu-app-v2 .acu-dialog-layer { background: rgba(0, 0, 0, 0.18) !important; }
