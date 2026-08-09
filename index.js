@@ -347,10 +347,13 @@
                     <style id="acu-v2-apple">
                         /* 苹果毛玻璃材料 token(全 !important 压 DB 侧 applyTheme 重写) */
                         #acu-app-v2 {
-                            --acu-bg-0: rgba(246, 246, 246, 0.78) !important;
-                            --acu-bg-1: rgba(248, 248, 250, 0.82) !important;
-                            --acu-bg-2: rgba(255, 255, 255, 0.6) !important;
-                            --acu-sidebar-bg: rgba(246, 246, 246, 0.8) !important;
+                            /* 三档透明度梯度拉开纵深(实机反馈:原来 bg0/bg1 明度差仅 0.9%,
+                               近白面板把毛玻璃填平)。shell 最透、面板次透、灰块再一档,
+                               每层之间能透出模糊背景形成层次。 */
+                            --acu-bg-0: rgba(244, 244, 247, 0.72) !important;
+                            --acu-bg-1: rgba(250, 250, 252, 0.85) !important;
+                            --acu-bg-2: rgba(226, 226, 232, 0.62) !important;
+                            --acu-sidebar-bg: rgba(246, 246, 248, 0.78) !important;
                             --acu-hover-overlay: rgba(0, 122, 255, 0.08) !important;
                             --acu-border: rgba(255, 255, 255, 0.5) !important;
                             --acu-border-2: rgba(0, 0, 0, 0.06) !important;
@@ -391,14 +394,34 @@
                         }
                         #acu-app-v2 .acu-v2-sidebar--desktop { border-right: 1px solid rgba(255, 255, 255, 0.4) !important; }
                         #acu-app-v2 .acu-v2-app__header { border-bottom: 1px solid rgba(255, 255, 255, 0.45) !important; }
-                        /* 内层面板用半透明白(0.8 平衡点),靠父容器已模糊的背衬托玻璃质感 */
+                        /* 内层面板:比 shell 实一档但保持可见透明(0.80),让 shell 的模糊
+                           透出来形成毛玻璃感;柔和投影(0.10/y 6px)从 shell 上浮起。
+                           太实(0.85+)会退化成白卡,毛玻璃质感消失。 */
                         #acu-app-v2 .acu-panel,
-                        #acu-app-v2 .acu-dialog,
-                        #acu-app-v2 .acu-v2-drawer,
                         #acu-app-v2 .acu-v2-app__theme-menu {
                             background: rgba(255, 255, 255, 0.8) !important;
                             -webkit-backdrop-filter: none !important;
                             backdrop-filter: none !important;
+                            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+                        }
+                        /* 浮层:半透明保持玻璃感(0.82,别做实色),投影更深压住遮罩 */
+                        #acu-app-v2 .acu-dialog,
+                        #acu-app-v2 .acu-v2-drawer {
+                            background: rgba(255, 255, 255, 0.82) !important;
+                            box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08) !important;
+                        }
+                        /* 表格:表头加极淡底与 shell 区分,行分隔线用淡灰(不再是隐形白边) */
+                        #acu-app-v2 .acu-v2-form-fill-page__table-wrap th {
+                            background: rgba(0, 0, 0, 0.03) !important;
+                            border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+                        }
+                        #acu-app-v2 .acu-v2-form-fill-page__table-wrap td {
+                            border-bottom: 1px solid rgba(0, 0, 0, 0.05) !important;
+                        }
+                        /* 仪表盘健康卡:面板同款浮起 */
+                        #acu-app-v2 .acu-dashboard-page__health-item {
+                            background: rgba(255, 255, 255, 0.8) !important;
+                            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07) !important;
                         }
                         /* 弹层遮罩轻压暗 + 模糊,替掉 DB 默认纯色压暗 */
                         #acu-app-v2 .acu-dialog-layer { background: rgba(0, 0, 0, 0.18) !important; }
