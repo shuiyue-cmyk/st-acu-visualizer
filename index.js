@@ -352,9 +352,12 @@
         // DB 异步挂载后规则声明式自动命中,无需 MutationObserver 补挂。
         const $glass = $('#acu-v2-glass');
         $('#acu-v2-apple').remove(); // 兼容旧开关注入的 style
-        const glassStyle = config.dbStyle !== 'off' ? config.dbStyle : (config.dbAppleGlass ? 'apple' : 'off');
+        let glassStyle = config.dbStyle !== 'off' ? config.dbStyle : (config.dbAppleGlass ? 'apple' : 'off');
+        // 液体玻璃选项暂时隐藏(效果未达预期,待修复)——旧配置若仍是 clear,
+        // 临时按 apple 参数注入,避免用户处于隐藏选项却仍是 clear 效果的悬空状态。
+        if (glassStyle === 'clear') glassStyle = 'apple';
         if (glassStyle !== 'off') {
-            const isClear = glassStyle === 'clear';
+            const isClear = glassStyle === 'clear'; // 恒 false(clear 已回退 apple),液体玻璃暂缓
             const accent = DB_ACCENTS[config.dbAccent] || DB_ACCENTS.blue;
             const injectGlass = () => {
                 // 两种风格的材料 token:
@@ -1958,13 +1961,12 @@
                                 <div class="acu-input-col" style="gap:5px">
                                     <select id="cfg-db-style" class="acu-nice-select">
                                         <option value="off" ${(config.dbStyle === 'off' && !config.dbAppleGlass) ? 'selected' : ''}>关闭(默认)</option>
-                                        <option value="apple" ${(config.dbStyle === 'apple' || (config.dbAppleGlass && config.dbStyle === 'off')) ? 'selected' : ''}>苹果毛玻璃</option>
-                                        <option value="clear" ${config.dbStyle === 'clear' ? 'selected' : ''}>液体玻璃 ⚠️性能开销大</option>
+                                        <option value="apple" ${(config.dbStyle === 'apple' || (config.dbAppleGlass && config.dbStyle === 'off') || config.dbStyle === 'clear') ? 'selected' : ''}>苹果毛玻璃</option>
                                     </select>
-                                    <div style="font-size:11px; color:var(--acu-text-sub, #888); margin-top:2px;">液体玻璃按 Apple 全屏透明渲染,低配置设备可能明显卡顿;苹果毛玻璃性能友好。</div>
+                                    <div style="font-size:11px; color:var(--acu-text-sub, #888); margin-top:2px;">苹果毛玻璃性能友好,可透出酒馆界面。</div>
                                 </div>
                             </div>
-                            <div class="acu-control-row" id="row-db-accent" style="display:${(config.dbStyle === 'apple' || (config.dbAppleGlass && config.dbStyle === 'off')) ? 'flex' : 'none'}">
+                            <div class="acu-control-row" id="row-db-accent" style="display:${(config.dbStyle === 'apple' || config.dbStyle === 'clear' || (config.dbAppleGlass && config.dbStyle === 'off')) ? 'flex' : 'none'}">
                                 <div class="acu-label-col"><span class="acu-label-main">主色调</span></div>
                                 <div class="acu-input-col" style="gap:5px">
                                     <select id="cfg-db-accent" class="acu-nice-select">
