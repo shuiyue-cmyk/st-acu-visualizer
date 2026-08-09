@@ -360,12 +360,17 @@
                 // 两种风格的材料 token:
                 // apple=半透明白,最底层(bg0)较透(0.5),让酒馆界面透过毛玻璃朦胧可见
                 // (用户实机反馈:0.72 白壳把酒馆全盖住);面板层稍实保证内容可读。
-                // clear=「底层不透明白 + 主色调晕染,上层透明剥离」:最底层(bg0)用
-                // 不透明的白→主色调柔和渐变做底(文字可读性靠这不透明底兜住),
-                // 面板/侧栏/表格半透明白透出底层晕染,形成玻璃剥离层次
-                // (用户反馈:原纯透明 0.22 底文字可读性太差)。
+                // clear=「白色画布 + 颜料滴洒晕染,上层透明剥离」:最底层(bg0)用白色
+                // 画布垫底,上面滴几滴主色调颜料(radial-gradient),边缘自然模糊晕开,
+                // 像颜料滴在湿纸上洇开的柔和感(用户反馈:线性渐变太生硬);
+                // 面板/侧栏/表格半透明白透出底层晕染,形成玻璃剥离层次。
                 const bg0 = isClear
-                    ? `linear-gradient(160deg, #ffffff 0%, ${accent.accent}1a 60%, ${accent.accent}33 100%)`
+                    ? `radial-gradient(ellipse 42% 34% at 18% 22%, ${accent.accent}38 0%, transparent 72%),
+                       radial-gradient(ellipse 34% 28% at 82% 18%, ${accent.accent2}2e 0%, transparent 72%),
+                       radial-gradient(ellipse 38% 30% at 70% 86%, ${accent.accent}33 0%, transparent 72%),
+                       radial-gradient(ellipse 28% 24% at 20% 82%, ${accent.accent2}26 0%, transparent 72%),
+                       radial-gradient(ellipse 26% 22% at 48% 42%, ${accent.accent}22 0%, transparent 70%),
+                       linear-gradient(#ffffff, #ffffff)`
                     : 'rgba(244, 244, 247, 0.5)';
                 const bg1 = isClear ? 'rgba(255, 255, 255, 0.8)' : 'rgba(250, 250, 252, 0.75)';
                 const bg2 = isClear ? 'rgba(255, 255, 255, 0.6)' : 'rgba(226, 226, 232, 0.5)';
