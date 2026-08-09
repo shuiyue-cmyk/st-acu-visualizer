@@ -102,7 +102,9 @@
         dashboardPosition: 'embedded',
         dbTheme: 'default',
         dbTransparentMap: {},
-        dbAppleGlass: false
+        dbAppleGlass: false,
+        dbStyle: 'off',
+        dbAccent: 'blue'
     };
 
     const THEMES = [
@@ -147,6 +149,15 @@
         purple: { main: '#9b59b6', bg: 'rgba(155, 89, 182, 0.1)', name: '梦幻紫' },
         cyan:   { main: '#00bcd4', bg: 'rgba(0, 188, 212, 0.1)', name: '青空蓝' },
         teal:   { main: '#1abc9c', bg: 'rgba(26, 188, 156, 0.1)', name: '青绿' }
+    };
+
+    // 数据库新 UI 苹果/透明玻璃风格的主色调预设:accent 及其辉光/悬停覆盖
+    const DB_ACCENTS = {
+        blue:   { name: '苹果蓝', accent: '#007aff', accent2: '#0a84ff', glow: 'rgba(0, 122, 255, 0.25)', hover: 'rgba(0, 122, 255, 0.08)' },
+        pink:   { name: '樱花粉', accent: '#e86b9a', accent2: '#f48fb1', glow: 'rgba(232, 107, 154, 0.25)', hover: 'rgba(232, 107, 154, 0.08)' },
+        green:  { name: '薄荷绿', accent: '#34c759', accent2: '#30d158', glow: 'rgba(52, 199, 89, 0.25)', hover: 'rgba(52, 199, 89, 0.08)' },
+        purple: { name: '葡萄紫', accent: '#af52de', accent2: '#bf5af2', glow: 'rgba(175, 82, 222, 0.25)', hover: 'rgba(175, 82, 222, 0.08)' },
+        orange: { name: '暖橙', accent: '#ff9500', accent2: '#ffa233', glow: 'rgba(255, 149, 0, 0.25)', hover: 'rgba(255, 149, 0, 0.08)' },
     };
 
     const THEME_VARS = {
@@ -333,37 +344,54 @@
         const { $ } = getCore();
         if (!$) return;
         const $style = $('#acu-db-beautify');
-        // ── 数据库新 UI(#acu-app-v2,SP·数据库VIII)苹果毛玻璃模式 ──
+        // ── 数据库新 UI(#acu-app-v2,SP·数据库VIII)玻璃风格模式 ──
         // 与旧 dbTheme 机制互不干扰:开启时把 #acu-app-v2 的 23 个主题 token 全部
-        // 覆盖成苹果材料(半透明白 + blur 只给外层容器),关闭即移除、恢复 DB 原主题。
+        // 覆盖成玻璃材料(半透明白 + blur 只给外层容器),关闭即移除、恢复 DB 原主题。
+        // 两种风格:apple=苹果毛玻璃(半透明白+亮顶边);clear=透明玻璃(更透+强 blur)。
+        // 主色调由 DB_ACCENTS[config.dbAccent] 提供(accent/辉光/hover)。
         // DB 侧 applyTheme 会重写 <style id="acu-v2-theme">,但变量声明无 !important,
         // 这里全部带 !important 且 style 后插入,层叠上必定压住 DB 重写。
         // 不依赖任何 class:style 存在=开关开启,移除=恢复;选择器直接挂 #acu-app-v2,
         // DB 异步挂载后规则声明式自动命中,无需 MutationObserver 补挂。
-        const $apple = $('#acu-v2-apple');
-        if (config.dbAppleGlass) {
-            const injectApple = () => {
+        const $glass = $('#acu-v2-glass');
+        $('#acu-v2-apple').remove(); // 兼容旧开关注入的 style
+        const glassStyle = config.dbStyle !== 'off' ? config.dbStyle : (config.dbAppleGlass ? 'apple' : 'off');
+        if (glassStyle !== 'off') {
+            const isClear = glassStyle === 'clear';
+            const accent = DB_ACCENTS[config.dbAccent] || DB_ACCENTS.blue;
+            const injectGlass = () => {
+                // 两种风格的材料 token:apple=半透明白,最底层(bg0)刻意较透(0.5),
+                // 让酒馆界面透过毛玻璃朦胧可见(用户实机反馈:0.72 白壳把酒馆全盖住);
+                // 面板层稍实(0.75~0.85)保证内容可读。clear=纯透明玻璃(0.22~0.42),
+                // 纯靠强 blur 分隔,文字用深色保证可读。
+                const bg0 = isClear ? 'rgba(255, 255, 255, 0.22)' : 'rgba(244, 244, 247, 0.5)';
+                const bg1 = isClear ? 'rgba(255, 255, 255, 0.32)' : 'rgba(250, 250, 252, 0.75)';
+                const bg2 = isClear ? 'rgba(255, 255, 255, 0.18)' : 'rgba(226, 226, 232, 0.5)';
+                const sidebarBg = isClear ? 'rgba(255, 255, 255, 0.26)' : 'rgba(246, 246, 248, 0.55)';
+                const panelBg = isClear ? 'rgba(255, 255, 255, 0.36)' : 'rgba(255, 255, 255, 0.72)';
+                const floatBg = isClear ? 'rgba(255, 255, 255, 0.42)' : 'rgba(255, 255, 255, 0.75)';
+                const blurPx = isClear ? '24px' : '20px';
+                const sat = isClear ? '200%' : '180%';
+                const borderTop = isClear ? 'rgba(255, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.7)';
                 const css = `
-                    <style id="acu-v2-apple">
-                        /* 苹果毛玻璃材料 token(全 !important 压 DB 侧 applyTheme 重写) */
+                    <style id="acu-v2-glass">
+                        /* ${isClear ? '透明玻璃' : '苹果毛玻璃'}材料 token(全 !important 压 DB 侧 applyTheme 重写) */
                         #acu-app-v2 {
-                            /* 三档透明度梯度拉开纵深(实机反馈:原来 bg0/bg1 明度差仅 0.9%,
-                               近白面板把毛玻璃填平)。shell 最透、面板次透、灰块再一档,
-                               每层之间能透出模糊背景形成层次。 */
-                            --acu-bg-0: rgba(244, 244, 247, 0.72) !important;
-                            --acu-bg-1: rgba(250, 250, 252, 0.85) !important;
-                            --acu-bg-2: rgba(226, 226, 232, 0.62) !important;
-                            --acu-sidebar-bg: rgba(246, 246, 248, 0.78) !important;
-                            --acu-hover-overlay: rgba(0, 122, 255, 0.08) !important;
+                            /* 三档透明度梯度拉开纵深:shell 最透、面板次透、灰块再一档 */
+                            --acu-bg-0: ${bg0} !important;
+                            --acu-bg-1: ${bg1} !important;
+                            --acu-bg-2: ${bg2} !important;
+                            --acu-sidebar-bg: ${sidebarBg} !important;
+                            --acu-hover-overlay: ${accent.hover} !important;
                             --acu-border: rgba(255, 255, 255, 0.5) !important;
                             --acu-border-2: rgba(0, 0, 0, 0.06) !important;
                             --acu-text-1: #1d1d1f !important;
                             --acu-text-2: #6e6e73 !important;
                             --acu-text-3: #86868b !important;
-                            --acu-accent: #007aff !important;
-                            --acu-accent-2: #0a84ff !important;
+                            --acu-accent: ${accent.accent} !important;
+                            --acu-accent-2: ${accent.accent2} !important;
                             --acu-on-accent: #ffffff !important;
-                            --acu-accent-glow: rgba(0, 122, 255, 0.25) !important;
+                            --acu-accent-glow: ${accent.glow} !important;
                             --acu-success: #34c759 !important;
                             --acu-warning: #ff9f0a !important;
                             --acu-danger: #ff3b30 !important;
@@ -380,34 +408,32 @@
                         #acu-app-v2 .acu-dialog-layer,
                         #acu-app-v2 .acu-v2-drawer-layer,
                         #acu-app-v2 .acu-v2-app__mobile-nav-layer {
-                            -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-                            backdrop-filter: blur(20px) saturate(180%) !important;
+                            -webkit-backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
+                            backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
                         }
-                        /* 亮顶边(光打在材料上):所有玻璃容器——shell/侧栏/弹窗/抽屉都补,
-                           否则外壳看起来是「普通边框」而不是被光照亮的材料 */
+                        /* 亮顶边(光打在材料上):苹果风补全,透明玻璃淡一档 */
                         #acu-app-v2 .acu-v2-app__shell,
                         #acu-app-v2 .acu-dialog,
                         #acu-app-v2 .acu-v2-drawer,
                         #acu-app-v2 .acu-panel,
                         #acu-app-v2 .acu-v2-app__theme-menu {
-                            border-top: 1px solid rgba(255, 255, 255, 0.7) !important;
+                            border-top: 1px solid ${borderTop} !important;
                         }
                         #acu-app-v2 .acu-v2-sidebar--desktop { border-right: 1px solid rgba(255, 255, 255, 0.4) !important; }
                         #acu-app-v2 .acu-v2-app__header { border-bottom: 1px solid rgba(255, 255, 255, 0.45) !important; }
-                        /* 内层面板:比 shell 实一档但保持可见透明(0.80),让 shell 的模糊
-                           透出来形成毛玻璃感;柔和投影(0.10/y 6px)从 shell 上浮起。
-                           太实(0.85+)会退化成白卡,毛玻璃质感消失。 */
+                        /* 内层面板:比 shell 实一档但保持可见透明,让 shell 的模糊
+                           透出来形成玻璃感;柔和投影从 shell 上浮起 */
                         #acu-app-v2 .acu-panel,
                         #acu-app-v2 .acu-v2-app__theme-menu {
-                            background: rgba(255, 255, 255, 0.8) !important;
+                            background: ${panelBg} !important;
                             -webkit-backdrop-filter: none !important;
                             backdrop-filter: none !important;
                             box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.05) !important;
                         }
-                        /* 浮层:半透明保持玻璃感(0.82,别做实色),投影更深压住遮罩 */
+                        /* 浮层:半透明保持玻璃感,投影更深压住遮罩 */
                         #acu-app-v2 .acu-dialog,
                         #acu-app-v2 .acu-v2-drawer {
-                            background: rgba(255, 255, 255, 0.82) !important;
+                            background: ${floatBg} !important;
                             box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08) !important;
                         }
                         /* 表格:表头加极淡底与 shell 区分,行分隔线用淡灰(不再是隐形白边) */
@@ -420,7 +446,7 @@
                         }
                         /* 仪表盘健康卡:面板同款浮起 */
                         #acu-app-v2 .acu-dashboard-page__health-item {
-                            background: rgba(255, 255, 255, 0.8) !important;
+                            background: ${panelBg} !important;
                             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07) !important;
                         }
                         /* 弹层遮罩轻压暗 + 模糊,替掉 DB 默认纯色压暗 */
@@ -432,7 +458,9 @@
                             #acu-app-v2 .acu-v2-app__shell,
                             #acu-app-v2 .acu-dialog-layer,
                             #acu-app-v2 .acu-v2-drawer-layer,
-                            #acu-app-v2 .acu-v2-app__mobile-nav-layer {
+                            #acu-app-v2 .acu-v2-app__mobile-nav-layer,
+                            #acu-app-v2 .acu-v2-sidebar--desktop,
+                            #acu-app-v2 .acu-v2-app__header {
                                 background: #f5f5f7 !important;
                                 -webkit-backdrop-filter: none !important;
                                 backdrop-filter: none !important;
@@ -440,7 +468,8 @@
                             #acu-app-v2 .acu-panel,
                             #acu-app-v2 .acu-dialog,
                             #acu-app-v2 .acu-v2-drawer,
-                            #acu-app-v2 .acu-v2-app__theme-menu {
+                            #acu-app-v2 .acu-v2-app__theme-menu,
+                            #acu-app-v2 .acu-dashboard-page__health-item {
                                 background: #ffffff !important;
                             }
                         }
@@ -448,7 +477,9 @@
                             #acu-app-v2 .acu-v2-app__shell,
                             #acu-app-v2 .acu-dialog-layer,
                             #acu-app-v2 .acu-v2-drawer-layer,
-                            #acu-app-v2 .acu-v2-app__mobile-nav-layer {
+                            #acu-app-v2 .acu-v2-app__mobile-nav-layer,
+                            #acu-app-v2 .acu-v2-sidebar--desktop,
+                            #acu-app-v2 .acu-v2-app__header {
                                 background: #f5f5f7 !important;
                                 -webkit-backdrop-filter: none !important;
                                 backdrop-filter: none !important;
@@ -456,18 +487,19 @@
                             #acu-app-v2 .acu-panel,
                             #acu-app-v2 .acu-dialog,
                             #acu-app-v2 .acu-v2-drawer,
-                            #acu-app-v2 .acu-v2-app__theme-menu {
+                            #acu-app-v2 .acu-v2-app__theme-menu,
+                            #acu-app-v2 .acu-dashboard-page__health-item {
                                 background: #ffffff !important;
                             }
                         }
                     </style>
                 `;
-                if ($apple.length) $apple.replaceWith(css); else $('head').append(css);
+                if ($glass.length) $glass.replaceWith(css); else $('head').append(css);
             };
-            injectApple();
+            injectGlass();
             return;
         } else {
-            $apple.remove();
+            $glass.remove();
         }
         if (config.dbTheme && config.dbTheme !== 'default') {
             const t = THEME_VARS[config.dbTheme] || THEME_VARS.aurora;
@@ -2038,12 +2070,21 @@
                                 </div>
                             </div>
                             <div class="acu-control-row">
-                                <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">数据库UI苹果风</span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">新UI(#acu-app-v2)套苹果毛玻璃,关闭恢复原样</span></div>
-                                <div class="acu-input-col">
-                                    <label class="acu-switch">
-                                        <input type="checkbox" id="cfg-db-apple-glass" ${config.dbAppleGlass ? 'checked' : ''}>
-                                        <span class="acu-slider-switch"></span>
-                                    </label>
+                                <div class="acu-label-col"><span class="acu-label-main">数据库UI风格</span></div>
+                                <div class="acu-input-col" style="gap:5px">
+                                    <select id="cfg-db-style" class="acu-nice-select">
+                                        <option value="off" ${(config.dbStyle === 'off' && !config.dbAppleGlass) ? 'selected' : ''}>关闭(默认)</option>
+                                        <option value="apple" ${(config.dbStyle === 'apple' || (config.dbAppleGlass && config.dbStyle === 'off')) ? 'selected' : ''}>苹果毛玻璃</option>
+                                        <option value="clear" ${config.dbStyle === 'clear' ? 'selected' : ''}>透明玻璃</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="acu-control-row">
+                                <div class="acu-label-col"><span class="acu-label-main">主色调</span></div>
+                                <div class="acu-input-col" style="gap:5px">
+                                    <select id="cfg-db-accent" class="acu-nice-select">
+                                        ${Object.entries(DB_ACCENTS).map(([k, a]) => `<option value="${k}" ${(config.dbAccent || 'blue') === k ? 'selected' : ''}>${a.name}</option>`).join('')}
+                                    </select>
                                 </div>
                             </div>
                             
@@ -2402,8 +2443,14 @@ ${allTableNames.map(tName => {
             saveConfig({ dbTheme: val });
         });
 
-        dialog.find('#cfg-db-apple-glass').on('change', function() {
-            saveConfig({ dbAppleGlass: $(this).is(':checked') });
+        dialog.find('#cfg-db-style').on('change', function() {
+            const val = $(this).val();
+            // 风格选择同步写 dbStyle 与旧布尔开关,保证注入逻辑与设置界面两态一致
+            saveConfig({ dbStyle: val, dbAppleGlass: val !== 'off' });
+        });
+
+        dialog.find('#cfg-db-accent').on('change', function() {
+            saveConfig({ dbAccent: $(this).val() });
         });
 
         dialog.find('.acu-reverse-check').on('change', function() {
