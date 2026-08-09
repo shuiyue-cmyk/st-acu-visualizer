@@ -149,7 +149,7 @@
         teal:   { main: '#1abc9c', bg: 'rgba(26, 188, 156, 0.1)', name: '青绿' }
     };
 
-    // 数据库新 UI 苹果/透明玻璃风格的主色调预设:accent 及其辉光/悬停覆盖
+    // 数据库新 UI 苹果/液体玻璃风格的主色调预设:accent 及其辉光/悬停覆盖
     const DB_ACCENTS = {
         blue:   { name: '苹果蓝', accent: '#007aff', accent2: '#0a84ff', glow: 'rgba(0, 122, 255, 0.25)', hover: 'rgba(0, 122, 255, 0.08)' },
         pink:   { name: '樱花粉', accent: '#e86b9a', accent2: '#f48fb1', glow: 'rgba(232, 107, 154, 0.25)', hover: 'rgba(232, 107, 154, 0.08)' },
@@ -344,7 +344,7 @@
         // ── 数据库新 UI(#acu-app-v2,SP·数据库VIII)玻璃风格模式 ──
         // 开启时把 #acu-app-v2 的 23 个主题 token 全部覆盖成玻璃材料
         // (半透明白 + blur 只给外层容器),关闭即移除、恢复 DB 原主题。
-        // 两种风格:apple=苹果毛玻璃(半透明白+亮顶边);clear=透明玻璃(更透+强 blur)。
+        // 两种风格:apple=苹果毛玻璃(半透明白+亮顶边);clear=液体玻璃(全透 liquid glass)。
         // 主色调由 DB_ACCENTS[config.dbAccent] 提供(accent/辉光/hover)。
         // DB 侧 applyTheme 会重写 <style id="acu-v2-theme">,但变量声明无 !important,
         // 这里全部带 !important 且 style 后插入,层叠上必定压住 DB 重写。
@@ -360,10 +360,8 @@
                 // 两种风格的材料 token:
                 // apple=半透明白,最底层(bg0)较透(0.5),让酒馆界面透过毛玻璃朦胧可见
                 // (用户实机反馈:0.72 白壳把酒馆全盖住);面板层稍实保证内容可读。
-                // clear=「白色画布 + 颜料滴洒晕染,上层透明剥离」:最底层(bg0)用白色
-                // 画布垫底,上面滴几滴主色调颜料(radial-gradient),边缘自然模糊晕开,
-                // 像颜料滴在湿纸上洇开的柔和感(用户反馈:线性渐变太生硬);
-                // 面板/侧栏/表格半透明白透出底层晕染,形成玻璃剥离层次。
+                // clear=液体玻璃,完全按 Apple liquid glass:半透明底全透出宿主(酒馆),
+                // 斜向扫光 + blur + vibrant 文字,面板实底保可读(见下方 bg0 注释)。
                 // ── Apple liquid glass 材质:镜面反射高光(specular highlight) ──
                 // 参考 apple-skills ios-liquid-glass:玻璃「blur 背后 + 反射周围色彩和光 +
                 // 镜面高光」。斜向光带用 background 多层渐变叠加(从亮到透明,不挡内容、
@@ -374,18 +372,13 @@
                 const glassHighlight = isClear
                     ? 'linear-gradient(155deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.35) 18%, rgba(255,255,255,0) 38%)'
                     : 'none';
-                // clear 底层 = 半透明白「玻璃画布」+ 颜料滴洒:半透明让宿主(酒馆界面)
-                // 透过玻璃朦胧可见(liquid glass 真透明),颜料滴保留白画布+水滴晕染的
-                // 视觉基调;可读性靠 shell 的 blur + 面板 0.8 实底兜住(kimi 实测宿主
-                // 极深色 #0a0a0a-121212,浅玻璃 0.8 + 深字可读性最好)。
+                // 液体玻璃(clear)底层 = 纯 liquid glass 材质:斜向扫光 + 半透明白底,
+                // 完全透出宿主(酒馆界面)内容——不再有白画布/颜料滴装饰(用户指令:
+                // 去掉之前的最底层设计,完全按 Apple liquid glass)。可读性靠 shell 的
+                // blur + 面板 0.85 实底 + vibrant 文字兜住(kimi 实测宿主极深色
+                // #0a0a0a-121212,浅玻璃 0.8 + 深字可读性最好)。
                 const bg0 = isClear
-                    ? `${glassHighlight},
-                       radial-gradient(ellipse 42% 34% at 18% 22%, ${accent.accent}38 0%, transparent 72%),
-                       radial-gradient(ellipse 34% 28% at 82% 18%, ${accent.accent2}2e 0%, transparent 72%),
-                       radial-gradient(ellipse 38% 30% at 70% 86%, ${accent.accent}33 0%, transparent 72%),
-                       radial-gradient(ellipse 28% 24% at 20% 82%, ${accent.accent2}26 0%, transparent 72%),
-                       radial-gradient(ellipse 26% 22% at 48% 42%, ${accent.accent}22 0%, transparent 70%),
-                       rgba(255, 255, 255, 0.55)`
+                    ? `${glassHighlight}, rgba(255, 255, 255, 0.5)`
                     : 'rgba(244, 244, 247, 0.5)';
                 const bg1 = isClear ? 'rgba(255, 255, 255, 0.8)' : 'rgba(250, 250, 252, 0.75)';
                 const bg2 = isClear ? 'rgba(255, 255, 255, 0.6)' : 'rgba(226, 226, 232, 0.5)';
@@ -448,7 +441,7 @@
                 } catch (e) { /* 检测失败时保持默认样式 */ }
                 const css = `
                     <style id="acu-v2-glass">
-                        /* ${isClear ? '透明玻璃' : '苹果毛玻璃'}材料 token(全 !important 压 DB 侧 applyTheme 重写) */
+                        /* ${isClear ? '液体玻璃' : '苹果毛玻璃'}材料 token(全 !important 压 DB 侧 applyTheme 重写) */
                         #acu-app-v2 {
                             /* 三档透明度梯度拉开纵深:shell 最透、面板次透、灰块再一档 */
                             --acu-bg-0: ${bg0} !important;
@@ -479,8 +472,8 @@
                         }
                         /* 毛玻璃只给外层容器。子元素零 backdrop-filter:
                            每加一个就是多一个合成层 + 一次对背景的高斯模糊。
-                           shell 两风格都 blur:apple 半透明揉酒馆,clear 半透明白画布
-                           + 颜料也要 blur 揉宿主底(clear 底层 0.55 半透明透出宿主)。 */
+                           shell 两风格都 blur:apple 半透明揉酒馆,clear 液体玻璃
+                           半透明底(0.5)也要 blur 揉宿主底、透出朦胧酒馆。 */
                         #acu-app-v2 .acu-v2-app__shell,
                         #acu-app-v2 .acu-dialog-layer,
                         #acu-app-v2 .acu-v2-drawer-layer,
@@ -488,7 +481,7 @@
                             -webkit-backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
                             backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
                         }
-                        /* 亮顶边(光打在材料上):苹果风补全,透明玻璃淡一档 */
+                        /* 亮顶边(光打在材料上):苹果风补全,液体玻璃淡一档 */
                         #acu-app-v2 .acu-v2-app__shell,
                         #acu-app-v2 .acu-dialog,
                         #acu-app-v2 .acu-v2-drawer,
@@ -500,8 +493,8 @@
                         #acu-app-v2 .acu-v2-app__header { border-bottom: 1px solid rgba(255, 255, 255, 0.45) !important; }
                         /* 镜面反射高光:面板/浮层的斜向光带已在各自 background 里拼接
                            (多层渐变,不碰 shell——shell 的 background 是 DB 用
-                           var(--acu-bg-0) 消费,覆盖 background-image 会把颜料滴渐变
-                           一起盖掉)。shell 保留亮顶边 + bg0 颜料滴即可。 */
+                           var(--acu-bg-0) 消费,覆盖 background-image 会把扫光渐变
+                           一起盖掉)。shell 保留亮顶边 + bg0 扫光即可。 */
                         /* 内层面板:比 shell 实一档但保持可见透明,让 shell 的模糊
                            透出来形成玻璃感;clear 时叠加斜向光带 + 内反光(玻璃厚度) */
                         #acu-app-v2 .acu-panel,
@@ -597,9 +590,6 @@
                         #acu-app-v2[data-host="light"] .acu-dialog,
                         #acu-app-v2[data-host="light"] .acu-v2-drawer {
                             background: linear-gradient(160deg, rgba(255,255,255,0.92) 0%, color-mix(in srgb, ${accent.accent} 22%, #eceef2) 100%) !important;
-                        }
-                        #acu-app-v2[data-host="light"] .acu-v2-app__shell {
-                            background-image: none !important;
                         }` : ''}
                     </style>
                 `;
@@ -1934,7 +1924,7 @@
                                     <select id="cfg-db-style" class="acu-nice-select">
                                         <option value="off" ${(config.dbStyle === 'off' && !config.dbAppleGlass) ? 'selected' : ''}>关闭(默认)</option>
                                         <option value="apple" ${(config.dbStyle === 'apple' || (config.dbAppleGlass && config.dbStyle === 'off')) ? 'selected' : ''}>苹果毛玻璃</option>
-                                        <option value="clear" ${config.dbStyle === 'clear' ? 'selected' : ''}>透明玻璃</option>
+                                        <option value="clear" ${config.dbStyle === 'clear' ? 'selected' : ''}>液体玻璃</option>
                                     </select>
                                 </div>
                             </div>
