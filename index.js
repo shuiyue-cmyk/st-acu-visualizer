@@ -374,6 +374,10 @@
                 const glassHighlight = isClear
                     ? 'linear-gradient(155deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.35) 18%, rgba(255,255,255,0) 38%)'
                     : 'none';
+                // clear 底层 = 半透明白「玻璃画布」+ 颜料滴洒:半透明让宿主(酒馆界面)
+                // 透过玻璃朦胧可见(liquid glass 真透明),颜料滴保留白画布+水滴晕染的
+                // 视觉基调;可读性靠 shell 的 blur + 面板 0.8 实底兜住(kimi 实测宿主
+                // 极深色 #0a0a0a-121212,浅玻璃 0.8 + 深字可读性最好)。
                 const bg0 = isClear
                     ? `${glassHighlight},
                        radial-gradient(ellipse 42% 34% at 18% 22%, ${accent.accent}38 0%, transparent 72%),
@@ -381,7 +385,7 @@
                        radial-gradient(ellipse 38% 30% at 70% 86%, ${accent.accent}33 0%, transparent 72%),
                        radial-gradient(ellipse 28% 24% at 20% 82%, ${accent.accent2}26 0%, transparent 72%),
                        radial-gradient(ellipse 26% 22% at 48% 42%, ${accent.accent}22 0%, transparent 70%),
-                       linear-gradient(#ffffff, #ffffff)`
+                       rgba(255, 255, 255, 0.55)`
                     : 'rgba(244, 244, 247, 0.5)';
                 const bg1 = isClear ? 'rgba(255, 255, 255, 0.8)' : 'rgba(250, 250, 252, 0.75)';
                 const bg2 = isClear ? 'rgba(255, 255, 255, 0.6)' : 'rgba(226, 226, 232, 0.5)';
@@ -405,6 +409,43 @@
                 const floatHighlight = isClear
                     ? 'box-shadow: inset 0 1px 0 rgba(255,255,255,0.75), inset 0 0 0 1px rgba(255,255,255,0.2), 0 16px 48px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08) !important;'
                     : 'box-shadow: 0 16px 48px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.08) !important;';
+                // ── 自适应明暗(Apple liquid glass 核心机制) ──
+                // 检测宿主页(酒馆)背景亮度,给 #acu-app-v2 挂 data-host-dark/light。
+                // 宿主暗(默认酒馆极深色)→ 玻璃提亮保可读(底下暗玻璃更实);
+                // 宿主亮 → 玻璃加深提对比。kimi 实测默认宿主 #0a0a0a-121212 极深,
+                // 浅玻璃 0.8 + 深字可读性最好,故暗宿主走「浅底+深字」。
+                // #acu-app-v2 由 DB 异步挂载,注入时可能还不存在——用 MutationObserver
+                // 等它出现后再补挂 data-host(explore-24 review:无补挂则属性永不生效)。
+                try {
+                    const applyHostAttr = () => {
+                        const root = document.getElementById('acu-app-v2');
+                        if (!root) return false;
+                        // body 背景可能是 transparent/渐变:取 #chat 或 body 的第一个
+                        // 非透明背景色,否则按酒馆默认深色处理(避免浅色宿主被误判暗)
+                        let bg = window.getComputedStyle(document.body).backgroundColor;
+                        if (bg === 'transparent' || /rgba?\(0,\s*0,\s*0,\s*0\)/.test(bg)) {
+                            const chat = document.querySelector('#chat');
+                            if (chat) bg = window.getComputedStyle(chat).backgroundColor;
+                        }
+                        const m = bg.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+                        if (m) {
+                            const luma = parseInt(m[1]) * 0.299 + parseInt(m[2]) * 0.587 + parseInt(m[3]) * 0.114;
+                            root.setAttribute('data-host', luma < 128 ? 'dark' : 'light');
+                        } else {
+                            root.setAttribute('data-host', 'dark'); // 无背景色按酒馆默认深色
+                        }
+                        return true;
+                    };
+                    if (!applyHostAttr() && window.MutationObserver && !window.__acuHostWatch) {
+                        // root 尚未挂载:观察 body 子级增删,出现即补挂,成功后 disconnect。
+                        // 用 window 标记防重复注册(开关/配置变化会多次调用 injectGlass)
+                        window.__acuHostWatch = true;
+                        const obs = new MutationObserver(() => {
+                            if (applyHostAttr()) { obs.disconnect(); window.__acuHostWatch = false; }
+                        });
+                        obs.observe(document.body, { childList: true, subtree: true });
+                    }
+                } catch (e) { /* 检测失败时保持默认样式 */ }
                 const css = `
                     <style id="acu-v2-glass">
                         /* ${isClear ? '透明玻璃' : '苹果毛玻璃'}材料 token(全 !important 压 DB 侧 applyTheme 重写) */
@@ -418,8 +459,10 @@
                             --acu-border: rgba(255, 255, 255, 0.5) !important;
                             --acu-border-2: rgba(0, 0, 0, 0.06) !important;
                             --acu-text-1: #1d1d1f !important;
-                            --acu-text-2: #6e6e73 !important;
-                            --acu-text-3: #86868b !important;
+                            /* vibrant 文字(liquid glass):次要文字用主色调混深,高饱和、
+                               随明暗自适应,比纯灰更有「玻璃上的彩色文字」感 */
+                            --acu-text-2: ${isClear ? `color-mix(in srgb, ${accent.accent} 45%, #1d1d1f)` : '#6e6e73'} !important;
+                            --acu-text-3: ${isClear ? `color-mix(in srgb, ${accent.accent} 30%, #86868b)` : '#86868b'} !important;
                             --acu-accent: ${accent.accent} !important;
                             --acu-accent-2: ${accent.accent2} !important;
                             --acu-on-accent: #ffffff !important;
@@ -436,9 +479,9 @@
                         }
                         /* 毛玻璃只给外层容器。子元素零 backdrop-filter:
                            每加一个就是多一个合成层 + 一次对背景的高斯模糊。
-                           apple:shell + 弹层都 blur(底层半透明要揉酒馆);
-                           clear:shell 是渐变不透明底,blur 无意义,仅弹层遮罩 blur。 */
-                        ${isClear ? '' : '#acu-app-v2 .acu-v2-app__shell,'}
+                           shell 两风格都 blur:apple 半透明揉酒馆,clear 半透明白画布
+                           + 颜料也要 blur 揉宿主底(clear 底层 0.55 半透明透出宿主)。 */
+                        #acu-app-v2 .acu-v2-app__shell,
                         #acu-app-v2 .acu-dialog-layer,
                         #acu-app-v2 .acu-v2-drawer-layer,
                         #acu-app-v2 .acu-v2-app__mobile-nav-layer {
@@ -504,14 +547,13 @@
                         /* 不支持 backdrop-filter:提实浅色背景保证可读(@supports 与
                            prefers-reduced-transparency 选择器集合与主规则完全一致) */
                         @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-                            ${!isClear ? '#acu-app-v2 .acu-v2-app__shell,' : ''}
+                            #acu-app-v2 .acu-v2-app__shell,
                             #acu-app-v2 .acu-dialog-layer,
                             #acu-app-v2 .acu-v2-drawer-layer,
                             #acu-app-v2 .acu-v2-app__mobile-nav-layer,
                             #acu-app-v2 .acu-v2-sidebar--desktop,
                             #acu-app-v2 .acu-v2-app__header {
-                                /* apple 的 shell 是半透明,无 blur 时必须提实(#f5f5f7)保证可读;
-                                   clear 的 shell 是渐变不透明底,不进兜底、保留晕染色系 */
+                                /* 两风格 shell 都是半透明底,无 blur 时必须提实(#f5f5f7)保证可读 */
                                 background: #f5f5f7 !important;
                                 -webkit-backdrop-filter: none !important;
                                 backdrop-filter: none !important;
@@ -525,7 +567,7 @@
                             }
                         }
                         @media (prefers-reduced-transparency: reduce) {
-                            ${!isClear ? '#acu-app-v2 .acu-v2-app__shell,' : ''}
+                            #acu-app-v2 .acu-v2-app__shell,
                             #acu-app-v2 .acu-dialog-layer,
                             #acu-app-v2 .acu-v2-drawer-layer,
                             #acu-app-v2 .acu-v2-app__mobile-nav-layer,
@@ -543,6 +585,22 @@
                                 background: #ffffff !important;
                             }
                         }
+                        /* ── 自适应明暗(liquid glass):宿主亮时玻璃加深提对比 ──
+                           默认宿主极深(#0a0a0a-121212)走浅玻璃+深字;若用户换浅色主题,
+                           data-host=light 时面板 tint 加深、边框更硬,避免浅玻璃浮在浅底上
+                           失去对比(kimi 实测:宿主极深,浅玻璃可读性最好,故只需亮宿主分支)。 */
+                        ${isClear ? `
+                        #acu-app-v2[data-host="light"] .acu-panel,
+                        #acu-app-v2[data-host="light"] .acu-v2-app__theme-menu {
+                            background: linear-gradient(160deg, rgba(255,255,255,0.9) 0%, color-mix(in srgb, ${accent.accent} 26%, #eceef2) 100%) !important;
+                        }
+                        #acu-app-v2[data-host="light"] .acu-dialog,
+                        #acu-app-v2[data-host="light"] .acu-v2-drawer {
+                            background: linear-gradient(160deg, rgba(255,255,255,0.92) 0%, color-mix(in srgb, ${accent.accent} 22%, #eceef2) 100%) !important;
+                        }
+                        #acu-app-v2[data-host="light"] .acu-v2-app__shell {
+                            background-image: none !important;
+                        }` : ''}
                     </style>
                 `;
                 if ($glass.length) $glass.replaceWith(css); else $('head').append(css);
