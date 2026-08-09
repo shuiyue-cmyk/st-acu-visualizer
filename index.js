@@ -2079,7 +2079,7 @@
                                     </select>
                                 </div>
                             </div>
-                            <div class="acu-control-row">
+                            <div class="acu-control-row" id="row-db-accent" style="display:${(config.dbStyle !== 'off' || config.dbAppleGlass) ? 'flex' : 'none'}">
                                 <div class="acu-label-col"><span class="acu-label-main">主色调</span></div>
                                 <div class="acu-input-col" style="gap:5px">
                                     <select id="cfg-db-accent" class="acu-nice-select">
@@ -2447,6 +2447,10 @@ ${allTableNames.map(tName => {
             const val = $(this).val();
             // 风格选择同步写 dbStyle 与旧布尔开关,保证注入逻辑与设置界面两态一致
             saveConfig({ dbStyle: val, dbAppleGlass: val !== 'off' });
+            // 主色调选项只在开启数据库UI风格(非「关闭」)时显示
+            const $row = dialog.find('#row-db-accent');
+            if (val !== 'off') $row.slideDown(150).css('display', 'flex');
+            else $row.slideUp(150);
         });
 
         dialog.find('#cfg-db-accent').on('change', function() {
