@@ -24,7 +24,7 @@
     let currentDiffMap = new Set();
     let observer = null;
     let columnResizeObserver = null;
-    let isCollapsed = localStorage.getItem(STORAGE_KEY_UI_COLLAPSE) === 'true';
+    let isCollapsed = (() => { try { return localStorage.getItem(STORAGE_KEY_UI_COLLAPSE) === 'true'; } catch (e) { return false; } })();
     let globalScrollTop = 0;
     let currentPage = 1;
     let currentSearchTerm = '';
@@ -174,7 +174,7 @@
         // 但把色相挪到暖粉。白是主体——所有面/卡片/按钮底都是高透明度白，只在
         // 边框/hover/激活/徽章这些「点」上用粉，避免整片糊成粉色。
         // accent 用玫瑰粉 #e86b9a（比 hotpink 稳，压得住白底上的文字对比度）。
-        // 注意 shadow 必须给「纯色」不能给 box-shadow 简写：全部 10 处消费方都是
+        // 注意 shadow 必须给「纯色」不能给 box-shadow 简写：全部 11 处消费方都是
         // `box-shadow: 0 4px 15px var(--acu-shadow)`，塞简写会让整条声明失效变成无阴影
         // （apple 主题就是这么写的，实测它其实一处阴影都没渲染）。
         blushglass: { bgNav: 'rgba(255, 252, 253, 0.78)', bgPanel: 'rgba(255, 253, 254, 0.8)', border: 'rgba(232, 107, 154, 0.24)', textMain: '#3d2b33', textSub: '#8a7480', uiColor: '#d1568a', btnBg: 'rgba(255, 250, 252, 0.82)', btnHover: 'rgba(255, 235, 243, 0.95)', btnActiveBg: '#e86b9a', btnActiveText: '#ffffff', tableHead: 'rgba(255, 240, 247, 0.78)', tableHover: 'rgba(232, 107, 154, 0.07)', shadow: 'rgba(209, 86, 138, 0.16)', cardBg: 'rgba(255, 255, 255, 0.8)', badgeBg: 'rgba(232, 107, 154, 0.12)', menuBg: 'rgba(255, 252, 253, 0.95)', menuText: '#3d2b33', inputBg: 'rgba(255, 255, 255, 0.85)', overlayBg: 'rgba(120, 60, 85, 0.3)' }
@@ -566,9 +566,6 @@
                     :not(#z) .auto-card-updater-popup input[type="checkbox"]:hover {
                         border-color: ${t.textMain} !important;
                     }
-!important;
-                    }
-
 
                 </style>
             `;
@@ -723,6 +720,15 @@
                         -webkit-backdrop-filter: none !important;
                         backdrop-filter: none !important;
                     }
+                    /* 与 @supports 兜底一致并补齐：减透明时弹窗/详情卡也要提实 */
+                    .acu-edit-dialog.acu-theme-apple { background-color: #f5f5f7 !important; }
+                    .acu-edit-dialog.acu-theme-apple textarea,
+                    .acu-edit-dialog.acu-theme-apple input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+                    .acu-edit-dialog.acu-theme-apple select { background-color: #ffffff !important; }
+                    .acu-quick-view-card.acu-theme-apple { background: #f5f5f7 !important; }
+                    .acu-quick-view-card.acu-theme-apple .acu-quick-view-header { background: #ffffff !important; }
+                    .acu-quick-view-card.acu-theme-apple .acu-full-item,
+                    .acu-quick-view-card.acu-theme-apple .acu-grid-item { background: #ffffff !important; }
                 }
 
                 /* ── 粉白磨砂 ──
@@ -1235,7 +1241,7 @@
                     background: linear-gradient(135deg, var(--acu-highlight), var(--acu-text-sub));
                     border-radius: inherit; z-index: -1; opacity: 0; transition: opacity 0.3s ease; filter: blur(8px);
                 }
-                .acu-data-card:hover::before { opacity: 0.3; }
+                .acu-theme-aurora .acu-data-card:hover::before, .acu-theme-sunset .acu-data-card:hover::before, .acu-theme-starship .acu-data-card:hover::before, .acu-theme-sky .acu-data-card:hover::before { opacity: 0.3; }
                 
                 @media (max-width: 768px) {
                     .acu-nav-btn {
@@ -1280,8 +1286,6 @@
                 .acu-edit-dialog.acu-theme-sky { background-color: #f0f9ff !important; }
                 .acu-edit-dialog.acu-theme-sky textarea, .acu-edit-dialog.acu-theme-sky input:not([type="checkbox"]):not([type="radio"]):not([type="color"]) { background-color: #ffffff !important; border-color: #bae6fd !important; }
                 
-                .acu-edit-dialog.acu-theme-neon textarea, .acu-edit-dialog.acu-theme-neon input:not([type="checkbox"]):not([type="radio"]):not([type="color"]) { background-color: #1a1a1a !important; border-color: #d946ef !important; color: #00ffcc !important; }
-
                 /* 苹果主题设置弹窗：毛玻璃材料化——半透明白背景 + blur，替代默认纯色面板。
                    内联样式 background-color !important 优先级高，此处同样 !important 覆盖。 */
                 .acu-edit-dialog.acu-theme-apple {
@@ -2450,7 +2454,9 @@ ${allTableNames.map(tName => {
                 $panel.html(htmlContent);
             } else {
                 const STORAGE_KEY_OPT_COLLAPSE = 'acu_opt_collapse_state';
-                const isCollapsed = localStorage.getItem(STORAGE_KEY_OPT_COLLAPSE) === 'true';
+                let isCollapsed;
+                try { isCollapsed = localStorage.getItem(STORAGE_KEY_OPT_COLLAPSE) === 'true'; }
+                catch (e) { isCollapsed = false; }
 
                 const $container = $('<div class="acu-embedded-options-container" style="margin-top: 6px; width: 100%; clear: both;"></div>');
                 $container.addClass(themeClass).attr('style', $container.attr('style') + '; ' + cssVars);
@@ -2549,7 +2555,7 @@ ${allTableNames.map(tName => {
                          ? sheet.headers.filter(h => h && String(h).toLowerCase() !== 'row_id')
                          : [];
                      const looksLikeOptionsByShape = headersNoId.length > 0
-                         && headersNoId.every(h => String(h).startsWith('选项'));
+                         && headersNoId.every(h => String(h).trim().startsWith('选项'));
                      const isOptionSheet = k.includes('选项')
                          || sheet?.key === 'sheet_OptionsNew'
                          || looksLikeOptionsByShape;
@@ -2884,7 +2890,6 @@ ${allTableNames.map(tName => {
                 itemsHtml += `<div style="padding:8px 10px; color:var(--acu-text-sub); font-size:11px; text-align:center; grid-column:1/-1;">仅显示前 ${CAPSULE_RENDER_CAP} 条，另有 ${skipped} 条请到表格页查看</div>`;
             }
 
-            const noLimitSlots = ['slot_tab1', 'slot_tab1_2', 'slot_tab1_3'];
             const customStyle = 'height: 100%; ' + gridStyleOverride + (window.innerWidth <= 768 ? 'max-height: 200px;' : '');
 
             return `<div class="acu-dash-npc-grid acu-no-scrollbar" style="${customStyle}">${itemsHtml}</div>`;
@@ -3810,11 +3815,8 @@ const checkRowChanged = (realIdx, row) => {
                      saveTableHeights(heights);
                      if (window.toastr) window.toastr.info('已重置为默认高度');
                      
-                     if (tableName === TAB_DASHBOARD) {
-                         $('#acu-data-area').css({height: '60vh', maxHeight: '95vh'});
-                     } else {
-                         $('#acu-data-area').css({height: '60vh', maxHeight: '95vh'});
-                     }
+                     // 重置为默认高度：仪表盘与数据表共用同一套高度，无需分支
+                     $('#acu-data-area').css({height: '60vh', maxHeight: '95vh'});
                 }
             });
             
@@ -4114,7 +4116,7 @@ const checkRowChanged = (realIdx, row) => {
              }
         });
         
-        $('.acu-opt-btn').on('click', function(e) {
+        $('.acu-opt-btn').off('click').on('click', function(e) {
              e.preventDefault(); e.stopPropagation();
              $(this).blur();
              const val = decodeURIComponent($(this).data('val'));
@@ -4176,7 +4178,7 @@ const checkRowChanged = (realIdx, row) => {
         
         const html = `
             <div class="acu-quick-view-overlay${overlayThemeClass(config.theme)}">
-                <div class="acu-quick-view-card acu-theme-${config.theme}" style="--acu-font-size: ${config.fontSize}px; font-size: ${config.fontSize}px;; --acu-text-max-height:${config.limitLongText!==false?'80px':'none'}; --acu-text-overflow:${config.limitLongText!==false?'auto':'visible'}">
+                <div class="acu-quick-view-card acu-theme-${config.theme}" style="--acu-font-size: ${config.fontSize}px; font-size: ${config.fontSize}px; --acu-text-max-height:${config.limitLongText!==false?'80px':'none'}; --acu-text-overflow:${config.limitLongText!==false?'auto':'visible'}">
                      <div class="acu-quick-view-header">
                         <span><i class="fa-solid ${getIconForTableName(tableName)}"></i> ${row[(titleColIdx !== undefined && titleColIdx !== null) ? titleColIdx : 1] || '详情'}</span>
                         <button class="acu-header-btn" id="qv-close"><i class="fa-solid fa-times"></i></button>
