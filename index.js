@@ -373,28 +373,29 @@
                     ? 'linear-gradient(155deg, rgba(255,255,255,0.85) 0%, rgba(255,255,255,0.35) 18%, rgba(255,255,255,0) 38%)'
                     : 'none';
                 // 液体玻璃(clear)底层 = 纯 liquid glass 材质:斜向扫光 + 半透明白底,
-                // 完全透出宿主(酒馆界面)内容——不再有白画布/颜料滴装饰(用户指令:
-                // 去掉之前的最底层设计,完全按 Apple liquid glass)。可读性靠 shell 的
-                // blur + 面板 0.85 实底 + vibrant 文字兜住(kimi 实测宿主极深色
-                // #0a0a0a-121212,浅玻璃 0.8 + 深字可读性最好)。
+                // 完全透出宿主(酒馆界面)内容——无色(用户指令:液体玻璃不要颜色,
+                // 「液体怎么会有颜色呢」)。文字用中性深灰,不用 color-mix 主色调混色;
+                // 面板纯半透明白,不用主色调 tint。既符合「液体无色」又减合成负载。
+                // shell 底色近实色(0.92):全屏 shell 不 blur(见 blur 规则注释,全屏
+                // backdrop-filter 是卡顿根因),近实色盖住底下酒馆文字避免清晰透出混乱;
+                // 玻璃质感由侧栏/面板/弹窗局部承担(Apple liquid glass 正解:玻璃是
+                // 局部控件材质,整屏背景是实色)。
                 const bg0 = isClear
-                    ? `${glassHighlight}, rgba(255, 255, 255, 0.5)`
-                    : 'rgba(244, 244, 247, 0.5)';
+                    ? `${glassHighlight}, rgba(255, 255, 255, 0.92)`
+                    : 'rgba(244, 244, 247, 0.92)';
                 const bg1 = isClear ? 'rgba(255, 255, 255, 0.8)' : 'rgba(250, 250, 252, 0.75)';
                 const bg2 = isClear ? 'rgba(255, 255, 255, 0.6)' : 'rgba(226, 226, 232, 0.5)';
                 const sidebarBg = isClear ? 'rgba(255, 255, 255, 0.75)' : 'rgba(246, 246, 248, 0.55)';
                 const panelBg = isClear ? 'rgba(255, 255, 255, 0.85)' : 'rgba(255, 255, 255, 0.72)';
                 const floatBg = isClear ? 'rgba(255, 255, 255, 0.88)' : 'rgba(255, 255, 255, 0.75)';
-                const blurPx = isClear ? '24px' : '20px';
-                const sat = isClear ? '220%' : '180%';
+                // 液体玻璃无色:blur 与 apple 同级(20px/180%)避免全屏 backdrop 过重
+                // (24px/220% 实机卡顿);苹果毛玻璃保持 20px/180%。
+                const blurPx = '20px';
+                const sat = '180%';
                 const borderTop = isClear ? 'rgba(255, 255, 255, 0.35)' : 'rgba(255, 255, 255, 0.7)';
-                // 面板底:clear 时从纯白改为「白→主色调混白浅色」渐变。右端必须不透明
-                // (color-mix 混出的浅主色调),不能像之前 #007aff14 那样 8% alpha——
-                // 那会让面板右半边透出黑底、深色文字对比度崩溃(kimi 黑底复审打回)。
-                // 左白右浅主色调,两端都实,给白色扫光制造对比又不影响正文可读。
-                const panelBgTint = isClear
-                    ? `linear-gradient(160deg, rgba(255,255,255,0.88) 0%, color-mix(in srgb, ${accent.accent} 16%, #f5f5f7) 100%)`
-                    : panelBg;
+                // 面板底:液体玻璃无色——纯半透明白(去掉主色调 tint);
+                // apple 保持 panelBg。
+                const panelBgTint = panelBg;
                 // 面板镜面高光 + 顶部内高光 + 边缘玻璃厚度
                 const panelHighlight = isClear
                     ? 'box-shadow: inset 0 1px 0 rgba(255,255,255,0.7), inset 0 0 0 1px rgba(255,255,255,0.18), 0 6px 18px rgba(0,0,0,0.1), 0 1px 3px rgba(0,0,0,0.05) !important;'
@@ -410,6 +411,12 @@
                 // #acu-app-v2 由 DB 异步挂载,注入时可能还不存在——用 MutationObserver
                 // 等它出现后再补挂 data-host(explore-24 review:无补挂则属性永不生效)。
                 try {
+                    // ── 自适应明暗:宿主亮度检测 ──
+                    // 之前用 MutationObserver 观察 body 整个子树 + 回调里 getComputedStyle
+                    // 强制同步重排:DB Vue 挂载期向 body 插几百个节点,每次触发回调都
+                    // 强制重排 → 严重卡顿(用户实机反馈)。改用轻量轮询:getElementById
+                    // 不触发重排(root 未出现时零成本),root 出现后才调一次 getComputedStyle,
+                    // 设完 data-host 立即停。
                     const applyHostAttr = () => {
                         const root = document.getElementById('acu-app-v2');
                         if (!root) return false;
@@ -429,14 +436,14 @@
                         }
                         return true;
                     };
-                    if (!applyHostAttr() && window.MutationObserver && !window.__acuHostWatch) {
-                        // root 尚未挂载:观察 body 子级增删,出现即补挂,成功后 disconnect。
-                        // 用 window 标记防重复注册(开关/配置变化会多次调用 injectGlass)
+                    if (!applyHostAttr() && !window.__acuHostWatch) {
                         window.__acuHostWatch = true;
-                        const obs = new MutationObserver(() => {
-                            if (applyHostAttr()) { obs.disconnect(); window.__acuHostWatch = false; }
-                        });
-                        obs.observe(document.body, { childList: true, subtree: true });
+                        const timer = setInterval(() => {
+                            if (applyHostAttr()) {
+                                clearInterval(timer);
+                                window.__acuHostWatch = false;
+                            }
+                        }, 300); // 300ms 轮询,root 未出现前只做 getElementById,零重排
                     }
                 } catch (e) { /* 检测失败时保持默认样式 */ }
                 const css = `
@@ -452,10 +459,9 @@
                             --acu-border: rgba(255, 255, 255, 0.5) !important;
                             --acu-border-2: rgba(0, 0, 0, 0.06) !important;
                             --acu-text-1: #1d1d1f !important;
-                            /* vibrant 文字(liquid glass):次要文字用主色调混深,高饱和、
-                               随明暗自适应,比纯灰更有「玻璃上的彩色文字」感 */
-                            --acu-text-2: ${isClear ? `color-mix(in srgb, ${accent.accent} 45%, #1d1d1f)` : '#6e6e73'} !important;
-                            --acu-text-3: ${isClear ? `color-mix(in srgb, ${accent.accent} 30%, #86868b)` : '#86868b'} !important;
+                            /* 液体玻璃无色:文字用中性深灰,不用 color-mix 主色调混色 */
+                            --acu-text-2: #6e6e73 !important;
+                            --acu-text-3: #86868b !important;
                             --acu-accent: ${accent.accent} !important;
                             --acu-accent-2: ${accent.accent2} !important;
                             --acu-on-accent: #ffffff !important;
@@ -470,16 +476,23 @@
                             --acu-radius-sm: 8px !important;
                             --acu-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06) !important;
                         }
-                        /* 毛玻璃只给外层容器。子元素零 backdrop-filter:
+                        /* 毛玻璃只给局部浮层(弹层遮罩/移动导航)。子元素零 backdrop-filter:
                            每加一个就是多一个合成层 + 一次对背景的高斯模糊。
-                           shell 两风格都 blur:apple 半透明揉酒馆,clear 液体玻璃
-                           半透明底(0.5)也要 blur 揉宿主底、透出朦胧酒馆。 */
-                        #acu-app-v2 .acu-v2-app__shell,
+                           ⚠️ 全屏 shell(.acu-v2-app__shell 是 fixed inset:0 覆盖整个视口)
+                           绝不加 backdrop-filter——整屏每帧高斯模糊是性能灾难,实机卡顿
+                           (用户反馈:液体玻璃/毛玻璃打开数据库界面都卡)。shell 用纯半透明
+                           底透出酒馆,玻璃质感由面板实底 + 弹窗局部 blur 承担。 */
                         #acu-app-v2 .acu-dialog-layer,
                         #acu-app-v2 .acu-v2-drawer-layer,
                         #acu-app-v2 .acu-v2-app__mobile-nav-layer {
                             -webkit-backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
                             backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
+                        }
+                        /* shell 半透明底透宿主:不 blur(全屏模糊太贵),视觉上靠底下
+                           酒馆自然透出 + 面板/弹窗的局部玻璃形成层次 */
+                        #acu-app-v2 .acu-v2-app__shell {
+                            -webkit-backdrop-filter: none !important;
+                            backdrop-filter: none !important;
                         }
                         /* 亮顶边(光打在材料上):苹果风补全,液体玻璃淡一档 */
                         #acu-app-v2 .acu-v2-app__shell,
@@ -580,16 +593,16 @@
                         }
                         /* ── 自适应明暗(liquid glass):宿主亮时玻璃加深提对比 ──
                            默认宿主极深(#0a0a0a-121212)走浅玻璃+深字;若用户换浅色主题,
-                           data-host=light 时面板 tint 加深、边框更硬,避免浅玻璃浮在浅底上
-                           失去对比(kimi 实测:宿主极深,浅玻璃可读性最好,故只需亮宿主分支)。 */
+                           data-host=light 时面板底色加深(中性灰,无色),避免浅玻璃浮在
+                           浅底上失去对比(kimi 实测:宿主极深,浅玻璃可读性最好)。 */
                         ${isClear ? `
                         #acu-app-v2[data-host="light"] .acu-panel,
                         #acu-app-v2[data-host="light"] .acu-v2-app__theme-menu {
-                            background: linear-gradient(160deg, rgba(255,255,255,0.9) 0%, color-mix(in srgb, ${accent.accent} 26%, #eceef2) 100%) !important;
+                            background: linear-gradient(160deg, rgba(255,255,255,0.92) 0%, rgba(220,222,228,0.94) 100%) !important;
                         }
                         #acu-app-v2[data-host="light"] .acu-dialog,
                         #acu-app-v2[data-host="light"] .acu-v2-drawer {
-                            background: linear-gradient(160deg, rgba(255,255,255,0.92) 0%, color-mix(in srgb, ${accent.accent} 22%, #eceef2) 100%) !important;
+                            background: linear-gradient(160deg, rgba(255,255,255,0.94) 0%, rgba(224,226,232,0.95) 100%) !important;
                         }` : ''}
                     </style>
                 `;
@@ -1928,7 +1941,7 @@
                                     </select>
                                 </div>
                             </div>
-                            <div class="acu-control-row" id="row-db-accent" style="display:${(config.dbStyle !== 'off' || config.dbAppleGlass) ? 'flex' : 'none'}">
+                            <div class="acu-control-row" id="row-db-accent" style="display:${(config.dbStyle === 'apple' || (config.dbAppleGlass && config.dbStyle === 'off')) ? 'flex' : 'none'}">
                                 <div class="acu-label-col"><span class="acu-label-main">主色调</span></div>
                                 <div class="acu-input-col" style="gap:5px">
                                     <select id="cfg-db-accent" class="acu-nice-select">
@@ -2291,9 +2304,9 @@ ${allTableNames.map(tName => {
             const val = $(this).val();
             // 风格选择同步写 dbStyle 与旧布尔开关,保证注入逻辑与设置界面两态一致
             saveConfig({ dbStyle: val, dbAppleGlass: val !== 'off' });
-            // 主色调选项只在开启数据库UI风格(非「关闭」)时显示
+            // 主色调只对「苹果毛玻璃」有意义(液体玻璃无色,用户:「液体怎么会有颜色呢」)
             const $row = dialog.find('#row-db-accent');
-            if (val !== 'off') $row.slideDown(150).css('display', 'flex');
+            if (val === 'apple') $row.slideDown(150).css('display', 'flex');
             else $row.slideUp(150);
         });
 
