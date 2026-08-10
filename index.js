@@ -2,6 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
+    const EXT_VERSION = '17.1.5'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -102,7 +103,8 @@
         dashboardPosition: 'embedded',
         dbTransparentMap: {},
         dbAppleGlass: false,
-        dbAccent: 'blue'
+        dbAccent: 'blue',
+        debugMode: false
     };
 
     const THEMES = [
@@ -280,6 +282,101 @@
     const saveTableStyles = (styles) => { try { localStorage.setItem(STORAGE_KEY_TABLE_STYLES, JSON.stringify(styles)); } catch (e) { console.error(e); } };
     const getDashConfig = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DASH_CONFIG)) || {}; } catch (e) { return {}; } };
     const saveDashConfig = (cfg) => { try { localStorage.setItem(STORAGE_KEY_DASH_CONFIG, JSON.stringify(cfg)); } catch (e) { console.error(e); } };
+
+    // ── 调试报告采集(T29):用户遇可复现问题可开「调试模式」→ 复现 → 生成报告 →
+    //    打开 GitHub 预填 issue 页提交(无 token,数据只在用户浏览器与 GitHub 间流转)。
+    const debugErrors = [];
+    const debugLongTasks = [];
+    let debugPerfMark = null;
+    let debugObs = null;
+    let debugErrorsHooked = false;
+    let debugOrigConsoleError = null;
+
+    const debugOnError = (e) => {
+        if (debugErrors.length < 50) debugErrors.push({ t: Date.now(), msg: String(e.message || '').slice(0, 300), src: (e.filename || '').slice(-80), line: e.lineno });
+    };
+    const debugConsoleError = function () {
+        try { if (debugErrors.length < 50) debugErrors.push({ t: Date.now(), msg: Array.prototype.slice.call(arguments).map(a => { try { return typeof a === 'string' ? a : JSON.stringify(a); } catch (_) { return String(a); } }).join(' ').slice(0, 300) }); } catch (_) {}
+        return debugOrigConsoleError ? debugOrigConsoleError.apply(console, arguments) : undefined;
+    };
+
+    const debugHook = () => {
+        if (debugErrorsHooked) return;
+        debugErrorsHooked = true;
+        // 收集运行时错误(带时间戳)
+        try {
+            window.addEventListener('error', debugOnError);
+            debugOrigConsoleError = console.error;
+            console.error = debugConsoleError;
+        } catch (_) {}
+        // 长任务采集(>50ms 阻塞主线程 = 卡顿信号)
+        try {
+            if (typeof PerformanceObserver === 'function') {
+                debugObs = new PerformanceObserver((list) => {
+                    list.getEntries().forEach((en) => { if (debugLongTasks.length < 50) debugLongTasks.push({ ms: Math.round(en.duration), t: Date.now() }); });
+                });
+                debugObs.observe({ entryTypes: ['longtask'] });
+            }
+        } catch (_) {}
+    };
+
+    const debugUnhook = () => {
+        try { if (debugObs) { debugObs.disconnect(); debugObs = null; } } catch (_) {}
+        try { window.removeEventListener('error', debugOnError); } catch (_) {}
+        try { if (debugOrigConsoleError) { console.error = debugOrigConsoleError; debugOrigConsoleError = null; } } catch (_) {}
+        debugErrorsHooked = false;
+    };
+
+    const collectDebugReport = () => {
+        const { $ } = getCore();
+        const env = (typeof window !== 'undefined') ? window : {};
+        const ua = (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : '';
+        // 环境信息
+        const report = {
+            time: new Date().toISOString(),
+            extVersion: EXT_VERSION,
+            ua: ua.slice(0, 300),
+            isTT: (window.__TAURITAVERN__) ? 'TauriTavern(TT)' : (/Tencent|MicroMessenger|QQ\//.test(ua) ? '可能(QQ/微信容器)' : (window.top !== window.self ? 'iframe' : '否')),
+            screen: (env.screen ? env.screen.width + 'x' + env.screen.height : '?') + ' dpr=' + (env.devicePixelRatio || 1),
+            viewport: (env.innerWidth || '?') + 'x' + (env.innerHeight || '?'),
+            stVersion: (env.SillyTavern && (env.SillyTavern.info ? (env.SillyTavern.info.version || '') : '')) || (env.ST ? 'ST存在' : ''),
+            memory: (typeof performance !== 'undefined' && performance.memory) ? { used: Math.round(performance.memory.usedJSHeapSize / 1048576) + 'MB', total: Math.round(performance.memory.jsHeapSizeLimit / 1048576) + 'MB' } : 'n/a',
+            errors: debugErrors.slice(-20),
+            longTasks: debugLongTasks.slice(-20),
+            perfMark: debugPerfMark,
+            domNodes: ($ ? $('body *').length : -1),
+            acuWrappers: ($ ? $('.acu-wrapper').length : -1),
+            glassInjected: !!document.getElementById('acu-v2-apple'),
+            configKeys: (() => { try { const c = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_CONFIG)); return c ? Object.keys(c).filter(k => !/snapshot/i.test(k)) : []; } catch (_) { return []; } })(),
+        };
+        // 注入是否生效(DB UI 挂载时)
+        try {
+            const root = document.getElementById('acu-app-v2');
+            report.dbUiMounted = !!root;
+            if (root) {
+                const cs = window.getComputedStyle(root);
+                report.dbUiBg0 = cs.getPropertyValue('--acu-bg-0').trim() || 'n/a';
+                report.dbUiBackdrop = cs.backdropFilter || 'none';
+            } else {
+                report.dbUiBg0 = 'n/a (DB UI 未挂载)';
+                report.dbUiBackdrop = 'n/a';
+            }
+        } catch (_) {}
+        return report;
+    };
+
+    const genDebugIssueUrl = () => {
+        const report = collectDebugReport();
+        const title = '[调试报告] ' + report.time;
+        const body = '环境: ' + report.ua.slice(0, 120) + '\n'
+            + '扩展版本: ' + report.extVersion + ' | ST: ' + report.stVersion + ' | TT: ' + report.isTT + '\n'
+            + '屏幕: ' + report.screen + ' | 视口: ' + report.viewport + ' | 内存: ' + (typeof report.memory === 'string' ? report.memory : JSON.stringify(report.memory)) + '\n'
+            + 'DOM节点: ' + report.domNodes + ' | DB UI挂载: ' + report.dbUiMounted + ' | 注入生效: ' + report.glassInjected + '\n'
+            + 'DB bg0: ' + report.dbUiBg0 + ' | DB backdrop: ' + report.dbUiBackdrop + '\n\n'
+            + '复现步骤: (请填写)\n\n'
+            + '```json\n' + JSON.stringify(report, null, 2) + '\n```';
+        return 'https://github.com/shuiyue-cmyk/st-acu-visualizer/issues/new?title=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
+    };
 
 
     const getReverseOrderTables = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_REVERSE_TABLES)) || []; } catch (e) { return []; } };
@@ -1817,20 +1914,20 @@
                                 </div>
                             </div>
                             <div class="acu-control-row">
-                                <div class="acu-label-col"><span class="acu-label-main">数据库UI主色调</span><span class="acu-label-sub" style="font-weight:normal">苹果毛玻璃的强调色</span></div>
-                                <div class="acu-input-col">
-                                    <select id="cfg-db-accent" class="acu-nice-select">
-                                        ${Object.entries(DB_ACCENTS).map(([k, a]) => `<option value="${k}" ${(config.dbAccent || 'blue') === k ? 'selected' : ''}>${a.name}</option>`).join('')}
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="acu-control-row">
                                 <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">数据库UI苹果风</span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">新UI(#acu-app-v2)套苹果毛玻璃,关闭恢复原样</span></div>
                                 <div class="acu-input-col">
                                     <label class="acu-switch">
                                         <input type="checkbox" id="cfg-db-apple-glass" ${config.dbAppleGlass ? 'checked' : ''}>
                                         <span class="acu-slider-switch"></span>
                                     </label>
+                                </div>
+                            </div>
+                            <div class="acu-control-row" id="row-db-accent" style="display:${config.dbAppleGlass ? 'flex' : 'none'}">
+                                <div class="acu-label-col"><span class="acu-label-main">数据库UI主色调</span><span class="acu-label-sub" style="font-weight:normal">苹果毛玻璃的强调色</span></div>
+                                <div class="acu-input-col">
+                                    <select id="cfg-db-accent" class="acu-nice-select">
+                                        ${Object.entries(DB_ACCENTS).map(([k, a]) => `<option value="${k}" ${(config.dbAccent || 'blue') === k ? 'selected' : ''}>${a.name}</option>`).join('')}
+                                    </select>
                                 </div>
                             </div>
                             
@@ -2043,6 +2140,29 @@ ${allTableNames.map(tName => {
                             <button class="acu-btn-block" id="btn-enter-sort" style="margin:0; flex:1; justify-content:center; font-weight:bold; padding:12px;">进入表格排序模式</button>
                         </div>
 
+                        <div class="acu-section-header" data-target="sec-debug"><div class="acu-section-title"><i class="fa-solid fa-bug"></i> 调试</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-debug"><div class="acu-settings-group">
+                            <div class="acu-control-row">
+                                <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">调试模式</span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">采集错误/长任务,用于复现卡顿等问题</span></div>
+                                <div class="acu-input-col">
+                                    <label class="acu-switch">
+                                        <input type="checkbox" id="cfg-debug-mode" ${config.debugMode ? 'checked' : ''}>
+                                        <span class="acu-slider-switch"></span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="acu-control-row">
+                                <div class="acu-label-col"><span class="acu-label-main">调试报告</span><span class="acu-label-sub" style="font-weight:normal">开启调试模式→复现问题→生成报告,自动打开 GitHub 预填 issue 页提交</span></div>
+                                <div class="acu-input-col" style="justify-content:flex-end">
+                                    <button class="acu-btn-block" id="btn-gen-debug-report" style="margin:0; padding:8px 14px; width:auto;">生成报告</button>
+                                </div>
+                            </div>
+                            <div class="acu-control-row" style="display:none;" id="row-debug-result">
+                                <div class="acu-input-col" style="width:100%;">
+                                    <a id="debug-issue-link" href="#" target="_blank" rel="noopener noreferrer" style="color:var(--acu-highlight); word-break:break-all; font-size:12px;">打开 GitHub issue 提交页</a>
+                                </div>
+                            </div>
+                        </div></div>
+
                     </div>
                 </div>
             </div>
@@ -2189,7 +2309,24 @@ ${allTableNames.map(tName => {
         });
 
         dialog.find('#cfg-db-apple-glass').on('change', function() {
-            saveConfig({ dbAppleGlass: $(this).is(':checked') });
+            const on = $(this).is(':checked');
+            saveConfig({ dbAppleGlass: on });
+            // 主色调行仅苹果风开启时显示(联动显隐)
+            dialog.find('#row-db-accent').css('display', on ? 'flex' : 'none');
+        });
+
+        dialog.find('#cfg-debug-mode').on('change', function() {
+            const on = $(this).is(':checked');
+            saveConfig({ debugMode: on });
+            if (on) debugHook(); else debugUnhook();
+        });
+        dialog.find('#btn-gen-debug-report').on('click', function() {
+            debugHook(); // 未开开关直接点按钮也保证采集挂载
+            const url = genDebugIssueUrl();
+            const $link = dialog.find('#debug-issue-link');
+            $link.attr('href', url).text(url.slice(0, 100) + '...');
+            dialog.find('#row-debug-result').css('display', 'flex');
+            if (window.open) { const w = window.open(url, '_blank'); if (w) w.focus(); }
         });
 
         dialog.find('.acu-reverse-check').on('change', function() {
@@ -4702,6 +4839,7 @@ const checkRowChanged = (realIdx, row) => {
         if (isInitialized) return;
         addStyles();
         applyConfigStyles(getConfig());
+        if (getConfig().debugMode) debugHook();
 
         // 填表结束后前端"及时刷新"兜底：以"填表开始"信号驱动稳定轮询。
         // DB 在填表开始时调 _notifyTableFillStart；轮询每 ~2s 比较 exportTableAsJson 指纹，
