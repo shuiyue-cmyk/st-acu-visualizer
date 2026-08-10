@@ -372,13 +372,12 @@
                     <style id="acu-v2-apple">
                         /* 苹果毛玻璃材料 token(全 !important 压 DB 侧 applyTheme 重写) */
                         #acu-app-v2 {
-                            /* 三档透明度梯度拉开纵深(实机反馈:原来 bg0/bg1 明度差仅 0.9%,
-                               近白面板把毛玻璃填平)。shell 最透、面板次透、灰块再一档,
-                               每层之间能透出模糊背景形成层次。 */
-                            --acu-bg-0: rgba(244, 244, 247, 0.72) !important;
-                            --acu-bg-1: rgba(250, 250, 252, 0.85) !important;
-                            --acu-bg-2: rgba(226, 226, 232, 0.62) !important;
-                            --acu-sidebar-bg: rgba(246, 246, 248, 0.78) !important;
+                            /* 三档透明度梯度拉开纵深。shell 最透(0.5,隔层纱:底下酒馆朦胧透出)、
+                               面板次透、灰块再一档,每层之间能透出模糊背景形成层次。 */
+                            --acu-bg-0: rgba(244, 244, 247, 0.5) !important;
+                            --acu-bg-1: rgba(250, 250, 252, 0.7) !important;
+                            --acu-bg-2: rgba(226, 226, 232, 0.55) !important;
+                            --acu-sidebar-bg: rgba(246, 246, 248, 0.6) !important;
                             --acu-hover-overlay: ${accent.hover} !important;
                             --acu-border: rgba(255, 255, 255, 0.5) !important;
                             --acu-border-2: rgba(0, 0, 0, 0.06) !important;
@@ -399,17 +398,19 @@
                             --acu-radius-sm: 8px !important;
                             --acu-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06) !important;
                         }
-                        /* 毛玻璃只给局部浮层本体(弹窗/抽屉)。子元素零 backdrop-filter:
-                           每加一个就是多一个合成层 + 一次对背景的高斯模糊。
+                        /* 毛玻璃只给局部容器(侧栏/面板/抽屉/弹窗),纱感落在这些局部层上。
+                           子元素零 backdrop-filter:每加一个就是多一个合成层 + 一次对背景的高斯模糊。
                            ⚠️ 全屏容器(shell/.acu-dialog-layer/.acu-v2-drawer-layer/
                            .acu-v2-app__mobile-nav-layer 都是 fixed inset:0 覆盖整个视口的
                            遮罩层)绝不能加 backdrop-filter——整屏每帧 GPU 高斯模糊是卡顿源
-                           (用户实机多次确认,16.10.12/16.10.9 已证修复)。blur 只给浮层本体:
-                           .acu-v2-drawer 侧边抽屉、.acu-dialog 弹窗卡片。 */
+                           (用户实机多次确认,16.10.12/16.10.9 已证修复)。纱感=shell 降透明度
+                           透出底下 + 侧栏/面板/抽屉/弹窗局部 blur。 */
+                        #acu-app-v2 .acu-v2-sidebar--desktop,
+                        #acu-app-v2 .acu-panel,
                         #acu-app-v2 .acu-v2-drawer,
                         #acu-app-v2 .acu-dialog {
-                            -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-                            backdrop-filter: blur(20px) saturate(180%) !important;
+                            -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
+                            backdrop-filter: blur(16px) saturate(180%) !important;
                         }
                         #acu-app-v2 .acu-v2-app__shell,
                         #acu-app-v2 .acu-dialog-layer,
@@ -432,7 +433,14 @@
                         /* 内层面板:比 shell 实一档但保持可见透明(0.80),让 shell 的模糊
                            透出来形成毛玻璃感;柔和投影(0.10/y 6px)从 shell 上浮起。
                            太实(0.85+)会退化成白卡,毛玻璃质感消失。 */
-                        #acu-app-v2 .acu-panel,
+                        /* 内层面板:半透明(0.72,纱感与可读性平衡——16.10.4 曾因 0.55 过透
+                            修到 0.85,0.72 介于其间保纱感又不糊字)让底下透出,纱感由局部
+                            blur(见上 blur 列表)承担;柔和投影(0.10/y 6px)从 shell 上浮起。 */
+                        #acu-app-v2 .acu-panel {
+                            background: rgba(255, 255, 255, 0.72) !important;
+                            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.05) !important;
+                        }
+                        /* 主题菜单:小浮层,自身不 blur(面积小无必要,玻璃感由底层面板承担) */
                         #acu-app-v2 .acu-v2-app__theme-menu {
                             background: rgba(255, 255, 255, 0.8) !important;
                             -webkit-backdrop-filter: none !important;
