@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.1.7'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.1.8'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -246,8 +246,6 @@
         if (n.includes('事件') || n.includes('备忘') || n.includes('记录') || n.includes('日程') || n.includes('纪要')) return 'fa-clipboard-list';
         return 'fa-table';
     };
-
-    const getBadgeStyle = (text) => { return ''; };
 
     const getActiveTabState = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_ACTIVE_TAB)); } catch (e) { return null; } };
     const saveActiveTabState = (tableName) => { try { localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, JSON.stringify(tableName)); } catch (e) { console.error(e); } };
@@ -842,8 +840,10 @@
                 .acu-edit-overlay.acu-theme-blushglass,
                 .acu-quick-view-overlay.acu-theme-blushglass {
                     background: rgba(120, 60, 85, 0.26) !important;
-                    -webkit-backdrop-filter: blur(6px) !important;
-                    backdrop-filter: blur(6px) !important;
+                    /* 遮罩层(fixed 全屏)不 blur——全屏每帧高斯模糊是卡顿源(性能审查第4轮 explore-57),
+                       毛玻璃由弹窗卡片本体 blur 承担 */
+                    -webkit-backdrop-filter: none !important;
+                    backdrop-filter: none !important;
                 }
                 /* 不支持 backdrop-filter 时提实背景（偏白，粉只留边），保证文字可读 */
                 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -1115,7 +1115,7 @@
                 .acu-tab-pane.active { display: block; }
                 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-                .acu-quick-view-overlay { position: fixed !important; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100vh; background: var(--acu-overlay-bg) !important; z-index: 2147483648 !important; display: flex !important; justify-content: center !important; align-items: center !important; backdrop-filter: blur(4px); }
+                .acu-quick-view-overlay { position: fixed !important; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100vh; background: var(--acu-overlay-bg) !important; z-index: 2147483648 !important; display: flex !important; justify-content: center !important; align-items: center !important; }
                 .acu-quick-view-card { background: var(--acu-card-bg); border-radius: 12px; border: 1px solid var(--acu-border); box-shadow: 0 15px 50px var(--acu-shadow); width: 90%; max-width: 450px; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; animation: popUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); color: var(--acu-text-main); }
                 .acu-quick-view-header { padding: 5px; background: var(--acu-table-head); border-bottom: 1px solid var(--acu-border); font-weight: bold; display: flex; justify-content: space-between; align-items: center; font-size: 1.1em; color: var(--acu-highlight); }
                 .acu-quick-view-body { padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; scrollbar-width: thin; }
@@ -1204,7 +1204,7 @@
                 .acu-cell-menu-item:hover { background-color: var(--acu-table-hover); }
                 .acu-cell-menu-item#act-delete { color: #e74c3c; }
 
-                .acu-edit-overlay { position: fixed !important; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100vh; background: var(--acu-overlay-bg) !important; z-index: 2147483646 !important; display: flex !important; justify-content: center !important; align-items: center !important; backdrop-filter: blur(2px); }
+                .acu-edit-overlay { position: fixed !important; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100vh; background: var(--acu-overlay-bg) !important; z-index: 2147483646 !important; display: flex !important; justify-content: center !important; align-items: center !important; }
                 .acu-edit-dialog { background-color: var(--acu-bg-panel) !important; width: 90%; max-width: 900px; max-height: 85vh; border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 15px 50px var(--acu-shadow); color: var(--acu-text-main) !important; border: 1px solid var(--acu-border); margin: auto !important; overflow: hidden; padding: 0; }
                 .acu-edit-title { flex: 0 0 auto; margin: 0; padding: 20px 24px; font-size: 16px; font-weight: bold; color: var(--acu-text-main); border-bottom: 1px solid var(--acu-border); }
                 .acu-settings-content { flex: 1; overflow-y: auto; padding: 20px 24px; display: block; }
@@ -1329,8 +1329,9 @@
                    让弹窗毛玻璃背景透出聊天内容而非黑幕。 */
                 .acu-edit-overlay.acu-theme-apple {
                     background: rgba(0, 0, 0, 0.28) !important;
-                    -webkit-backdrop-filter: blur(6px) !important;
-                    backdrop-filter: blur(6px) !important;
+                    /* 遮罩层(fixed 全屏)不 blur——全屏每帧高斯模糊是卡顿源(explore-57),毛玻璃由卡片本体 blur 承担 */
+                    -webkit-backdrop-filter: none !important;
+                    backdrop-filter: none !important;
                 }
                 /* 苹果主题详情弹窗（点单元格/卡片弹出的快速查看）：
                    默认只有 background: var(--acu-card-bg)，苹果主题下那是 rgba(255,255,255,0.6)——
@@ -1380,8 +1381,9 @@
                 /* 苹果主题详情弹窗 overlay：轻压暗 + 模糊，和设置弹窗一致 */
                 .acu-quick-view-overlay.acu-theme-apple {
                     background: rgba(0, 0, 0, 0.28) !important;
-                    -webkit-backdrop-filter: blur(6px) !important;
-                    backdrop-filter: blur(6px) !important;
+                    /* 遮罩层(fixed 全屏)不 blur——全屏每帧高斯模糊是卡顿源(explore-57),毛玻璃由卡片本体 blur 承担 */
+                    -webkit-backdrop-filter: none !important;
+                    backdrop-filter: none !important;
                 }
                 /* 不支持 backdrop-filter 时设置弹窗/详情弹窗都提实背景 */
                 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -1696,7 +1698,6 @@
             .acu-edit-overlay { 
                 position: fixed !important; top: 0; left: 0; right: 0; bottom: 0; 
                 background: rgba(0, 0, 0, 0.5) !important; 
-                backdrop-filter: blur(3px); 
                 z-index: 2147483647 !important; 
                 display: flex !important; 
                 align-items: center; justify-content: center;
@@ -2742,6 +2743,11 @@ ${allTableNames.map(tName => {
             let optBtnCount = 0; if (optionTables.length > 0 && !hideOptionsUntilUpdate) {
                 let buttonsHtml = '';
                 let hasBtns = false;
+                // 选项按钮封顶(性能审查第4轮 explore-56/57):大选项表每行每列都生成按钮,
+                // 无界增长会灌爆折叠容器+每次render全量重建(仿仪表盘 CAPSULE_RENDER_CAP=60),
+                // 超出部分用提示条引导去表格页。
+                const OPT_BTN_CAP = 60;
+                let optShown = 0, optSkipped = 0;
                 optionTables.forEach(table => {
                     if(table.rows && Array.isArray(table.headers)) {
                          // 关键修复：按 headers 的列数遍历，而不是按 row 的实际长度。
@@ -2754,13 +2760,17 @@ ${allTableNames.map(tName => {
                               for (let idx = 1; idx < colCount; idx++) {
                                    const cell = (row && row[idx] != null) ? String(row[idx]) : '';
                                    if (cell) {
+                                       if (optShown >= OPT_BTN_CAP) { optSkipped++; continue; }
                                        buttonsHtml += `<button class="acu-opt-btn" data-val="${encodeURIComponent(cell)}">${cell}</button>`;
-                                       hasBtns = true; optBtnCount++;
+                                       hasBtns = true; optBtnCount++; optShown++;
                                    }
                               }
                          });
                     }
                 });
+                if (optSkipped > 0) {
+                    buttonsHtml += `<div style="padding:8px 10px; color:var(--acu-text-sub); font-size:11px; text-align:center;">仅显示前 ${OPT_BTN_CAP} 个选项，另有 ${optSkipped} 个请到表格页查看</div>`;
+                }
                 if (hasBtns) {
                     optionBtnContent = buttonsHtml;
                 }
@@ -3543,7 +3553,6 @@ const checkRowChanged = (realIdx, row) => {
                     const cellStr = String(cell);
                     const displayCell = cellStr.trim();
                     if (displayCell === 'auto_merged') return;
-                    const badgeStyle = getBadgeStyle(displayCell);
                     const isCellChanged = currentDiffMap.has(`${tableName}-${realIndex}-${cIdx}`);
                     const cellHighlight = isCellChanged && config.highlightNew ? 'acu-highlight-changed' : '';
                     // 不再往属性里塞 data-val：encodeURIComponent 会把每个中文字扩成
@@ -3552,7 +3561,7 @@ const checkRowChanged = (realIdx, row) => {
                     // 内容只是页面上已经显示过的文字的副本。
                     // 单元格已带 key/row/col，取值时从数据模型读回即可（见 readCellValue）。
                     const dataAttrs = `data-key="${tableData.key}" data-tname="${tableName}" data-row="${realIndex}" data-col="${cIdx}"`;
-                    const contentHtml = badgeStyle ? `<span class="acu-badge ${badgeStyle}">${displayCell}</span>` : displayCell;
+                    const contentHtml = displayCell;
 
                     if (isListMode) {
                          fullHtml += `<div class="acu-cell acu-inline-item" ${dataAttrs}><div class="acu-inline-label">${headerName}</div><div class="acu-inline-value ${cellHighlight}">${contentHtml}</div></div>`;
@@ -4235,8 +4244,7 @@ const checkRowChanged = (realIdx, row) => {
                 const cellStr = String(cell);
                 const displayCell = cellStr.trim();
                 if (displayCell === 'auto_merged') return;
-                const badgeStyle = getBadgeStyle(displayCell);
-                const contentHtml = badgeStyle ? `<span class="acu-badge ${badgeStyle}">${displayCell}</span>` : displayCell;
+                const contentHtml = displayCell;
                 
                 if (currentStyle === 'list' || codeIdx > 0) {
                      fullHtml += `<div class="acu-cell acu-inline-item" style="cursor:default"><div class="acu-inline-label">${headerName}</div><div class="acu-inline-value">${contentHtml}</div></div>`;
@@ -4424,12 +4432,7 @@ const checkRowChanged = (realIdx, row) => {
                 else if ($cell.hasClass('acu-inline-item')) $displayTarget = $cell.find('.acu-inline-value');
                 else if ($cell.hasClass('acu-editable-title')) $displayTarget = $cell;
 
-                const badgeStyle = getBadgeStyle(newVal);
-                if (badgeStyle && !$cell.hasClass('acu-editable-title')) {
-                     $displayTarget.html(`<span class="acu-badge ${badgeStyle}">${newVal}</span>`);
-                } else {
-                     $displayTarget.text(newVal);
-                }
+                $displayTarget.text(newVal);
                 $displayTarget.addClass('acu-highlight-changed');
 
                 const rawData = getTableData();
