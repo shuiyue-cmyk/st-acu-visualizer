@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.1.6'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.1.7'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -287,7 +287,6 @@
     //    打开 GitHub 预填 issue 页提交(无 token,数据只在用户浏览器与 GitHub 间流转)。
     const debugErrors = [];
     const debugLongTasks = [];
-    let debugPerfMark = null;
     let debugObs = null;
     let debugErrorsHooked = false;
     let debugOrigConsoleError = null;
@@ -343,7 +342,6 @@
             memory: (typeof performance !== 'undefined' && performance.memory) ? { used: Math.round(performance.memory.usedJSHeapSize / 1048576) + 'MB', total: Math.round(performance.memory.jsHeapSizeLimit / 1048576) + 'MB' } : 'n/a',
             errors: debugErrors.slice(-20),
             longTasks: debugLongTasks.slice(-20),
-            perfMark: debugPerfMark,
             domNodes: ($ ? $('body *').length : -1),
             acuWrappers: ($ ? $('.acu-wrapper').length : -1),
             glassInjected: !!document.getElementById('acu-v2-apple'),
@@ -2322,8 +2320,10 @@ ${allTableNames.map(tName => {
             if (on) debugHook(); else debugUnhook();
         });
         dialog.find('#btn-gen-debug-report').on('click', function() {
-            debugHook(); // 未开开关直接点按钮也保证采集挂载
+            const wasOn = getConfig().debugMode;
+            if (!wasOn) debugHook(); // 开关未开:临时挂载采集一次
             const url = genDebugIssueUrl();
+            if (!wasOn) debugUnhook(); // 临时挂载用后即卸,不残留
             const $link = dialog.find('#debug-issue-link');
             $link.attr('href', url).text(url.slice(0, 100) + '...');
             dialog.find('#row-debug-result').css('display', 'flex');
