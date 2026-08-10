@@ -100,12 +100,11 @@
         collapsePosition: 'center',
         frontendPosition: 'bottom',
         dashboardPosition: 'embedded',
+        dbTheme: 'default',
         dbTransparentMap: {},
-        visibleColumns: {},
-        dbAppleGlass: false,
-        dbStyle: 'off',
-        dbAccent: 'blue'
+        dbAppleGlass: false
     };
+
     const THEMES = [
         { id: 'retro', name: '复古羊皮' },
         { id: 'dark', name: '极夜深空' },
@@ -140,16 +139,6 @@
         { id: 'kaiti', name: '清雅楷体', val: `'KaiTi', 'STKaiti', '楷体', serif` },
     ];
 
-    // HTML 转义工具:防存储型 XSS。数据库表数据(表名/列名/单元格内容)可能含
-    // 用户可控字符串,拼进 HTML 模板前必须转义 & < > " ' 五字符(安全审查
-    // explore-31/32/33 + general-73 独立复核:全文件曾无转义工具,多处注入点)。
-    const escapeHtml = (v) => String(v == null ? '' : v)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-
     const HIGHLIGHT_COLORS = {
         orange: { main: '#d35400', bg: 'rgba(211, 84, 0, 0.1)', name: '活力橙' },
         red:    { main: '#e91e63', bg: 'rgba(233, 30, 99, 0.1)', name: '绯红' },
@@ -158,15 +147,6 @@
         purple: { main: '#9b59b6', bg: 'rgba(155, 89, 182, 0.1)', name: '梦幻紫' },
         cyan:   { main: '#00bcd4', bg: 'rgba(0, 188, 212, 0.1)', name: '青空蓝' },
         teal:   { main: '#1abc9c', bg: 'rgba(26, 188, 156, 0.1)', name: '青绿' }
-    };
-
-    // 数据库新 UI 苹果毛玻璃风格的主色调预设:accent 及其辉光/悬停覆盖
-    const DB_ACCENTS = {
-        blue:   { name: '苹果蓝', accent: '#007aff', accent2: '#0a84ff', glow: 'rgba(0, 122, 255, 0.25)', hover: 'rgba(0, 122, 255, 0.08)' },
-        pink:   { name: '樱花粉', accent: '#e86b9a', accent2: '#f48fb1', glow: 'rgba(232, 107, 154, 0.25)', hover: 'rgba(232, 107, 154, 0.08)' },
-        green:  { name: '薄荷绿', accent: '#34c759', accent2: '#30d158', glow: 'rgba(52, 199, 89, 0.25)', hover: 'rgba(52, 199, 89, 0.08)' },
-        purple: { name: '葡萄紫', accent: '#af52de', accent2: '#bf5af2', glow: 'rgba(175, 82, 222, 0.25)', hover: 'rgba(175, 82, 222, 0.08)' },
-        orange: { name: '暖橙', accent: '#ff9500', accent2: '#ffa233', glow: 'rgba(255, 149, 0, 0.25)', hover: 'rgba(255, 149, 0, 0.08)' },
     };
 
     const THEME_VARS = {
@@ -352,53 +332,38 @@
     const injectDatabaseStyles = (config) => {
         const { $ } = getCore();
         if (!$) return;
-        // ── 数据库新 UI(#acu-app-v2,SP·数据库VIII)玻璃风格模式 ──
-        // 开启时把 #acu-app-v2 的 23 个主题 token 全部覆盖成玻璃材料
-        // (半透明白 + blur 只给外层容器),关闭即移除、恢复 DB 原主题。
-        // 玻璃风格:apple=苹果毛玻璃(半透明白+亮顶边)。透明玻璃/液体玻璃已删除。
-        // 主色调由 DB_ACCENTS[config.dbAccent] 提供(accent/辉光/hover)。
+        const $style = $('#acu-db-beautify');
+        // ── 数据库新 UI(#acu-app-v2,SP·数据库VIII)苹果毛玻璃模式 ──
+        // 与旧 dbTheme 机制互不干扰:开启时把 #acu-app-v2 的 23 个主题 token 全部
+        // 覆盖成苹果材料(半透明白 + blur 只给外层容器),关闭即移除、恢复 DB 原主题。
         // DB 侧 applyTheme 会重写 <style id="acu-v2-theme">,但变量声明无 !important,
         // 这里全部带 !important 且 style 后插入,层叠上必定压住 DB 重写。
         // 不依赖任何 class:style 存在=开关开启,移除=恢复;选择器直接挂 #acu-app-v2,
         // DB 异步挂载后规则声明式自动命中,无需 MutationObserver 补挂。
-        const $glass = $('#acu-v2-glass');
-        $('#acu-v2-apple').remove(); // 兼容旧开关注入的 style
-        // 只保留苹果毛玻璃一种玻璃风格(透明玻璃/液体玻璃已删除)。
-        // 兼容旧配置:dbStyle 曾存 apple/clear,一律归 apple;dbAppleGlass 直接判定。
-        const glassOn = config.dbAppleGlass || (config.dbStyle !== 'off' && config.dbStyle !== undefined);
-        if (glassOn) {
-            const accent = DB_ACCENTS[config.dbAccent] || DB_ACCENTS.blue;
-            const injectGlass = () => {
-                // 苹果毛玻璃:半透明白,最底层(bg0)较透(0.5),让酒馆界面透过毛玻璃
-                // 朦胧可见(用户实机反馈:0.72 白壳把酒馆全盖住);面板层稍实保证可读。
-                const bg0 = 'rgba(244, 244, 247, 0.5)';
-                const bg1 = 'rgba(250, 250, 252, 0.75)';
-                const bg2 = 'rgba(226, 226, 232, 0.5)';
-                const sidebarBg = 'rgba(246, 246, 248, 0.55)';
-                const panelBg = 'rgba(255, 255, 255, 0.72)';
-                const floatBg = 'rgba(255, 255, 255, 0.75)';
-                const blurPx = '20px';
-                const sat = '180%';
-                const borderTop = 'rgba(255, 255, 255, 0.7)';
+        const $apple = $('#acu-v2-apple');
+        if (config.dbAppleGlass) {
+            const injectApple = () => {
                 const css = `
-                    <style id="acu-v2-glass">
+                    <style id="acu-v2-apple">
                         /* 苹果毛玻璃材料 token(全 !important 压 DB 侧 applyTheme 重写) */
                         #acu-app-v2 {
-                            /* 三档透明度梯度拉开纵深:shell 最透、面板次透、灰块再一档 */
-                            --acu-bg-0: ${bg0} !important;
-                            --acu-bg-1: ${bg1} !important;
-                            --acu-bg-2: ${bg2} !important;
-                            --acu-sidebar-bg: ${sidebarBg} !important;
-                            --acu-hover-overlay: ${accent.hover} !important;
+                            /* 三档透明度梯度拉开纵深(实机反馈:原来 bg0/bg1 明度差仅 0.9%,
+                               近白面板把毛玻璃填平)。shell 最透、面板次透、灰块再一档,
+                               每层之间能透出模糊背景形成层次。 */
+                            --acu-bg-0: rgba(244, 244, 247, 0.72) !important;
+                            --acu-bg-1: rgba(250, 250, 252, 0.85) !important;
+                            --acu-bg-2: rgba(226, 226, 232, 0.62) !important;
+                            --acu-sidebar-bg: rgba(246, 246, 248, 0.78) !important;
+                            --acu-hover-overlay: rgba(0, 122, 255, 0.08) !important;
                             --acu-border: rgba(255, 255, 255, 0.5) !important;
                             --acu-border-2: rgba(0, 0, 0, 0.06) !important;
                             --acu-text-1: #1d1d1f !important;
                             --acu-text-2: #6e6e73 !important;
                             --acu-text-3: #86868b !important;
-                            --acu-accent: ${accent.accent} !important;
-                            --acu-accent-2: ${accent.accent2} !important;
+                            --acu-accent: #007aff !important;
+                            --acu-accent-2: #0a84ff !important;
                             --acu-on-accent: #ffffff !important;
-                            --acu-accent-glow: ${accent.glow} !important;
+                            --acu-accent-glow: rgba(0, 122, 255, 0.25) !important;
                             --acu-success: #34c759 !important;
                             --acu-warning: #ff9f0a !important;
                             --acu-danger: #ff3b30 !important;
@@ -409,38 +374,50 @@
                             --acu-radius-sm: 8px !important;
                             --acu-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06) !important;
                         }
-                        /* 毛玻璃只给外层容器(shell/各弹层)。子元素零 backdrop-filter:
-                           每加一个就是多一个合成层 + 一次对背景的高斯模糊。 */
+                        /* 毛玻璃只给局部浮层本体(弹窗/抽屉)。子元素零 backdrop-filter:
+                           每加一个就是多一个合成层 + 一次对背景的高斯模糊。
+                           ⚠️ 全屏容器(shell/.acu-dialog-layer/.acu-v2-drawer-layer/
+                           .acu-v2-app__mobile-nav-layer 都是 fixed inset:0 覆盖整个视口的
+                           遮罩层)绝不能加 backdrop-filter——整屏每帧 GPU 高斯模糊是卡顿源
+                           (用户实机多次确认,16.10.12/16.10.9 已证修复)。blur 只给浮层本体:
+                           .acu-v2-drawer 侧边抽屉、.acu-dialog 弹窗卡片。 */
+                        #acu-app-v2 .acu-v2-drawer,
+                        #acu-app-v2 .acu-dialog {
+                            -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+                            backdrop-filter: blur(20px) saturate(180%) !important;
+                        }
                         #acu-app-v2 .acu-v2-app__shell,
                         #acu-app-v2 .acu-dialog-layer,
                         #acu-app-v2 .acu-v2-drawer-layer,
                         #acu-app-v2 .acu-v2-app__mobile-nav-layer {
-                            -webkit-backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
-                            backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
+                            -webkit-backdrop-filter: none !important;
+                            backdrop-filter: none !important;
                         }
-                        /* 亮顶边(光打在材料上):所有玻璃容器——shell/侧栏/弹窗/抽屉都补 */
+                        /* 亮顶边(光打在材料上):所有玻璃容器——shell/侧栏/弹窗/抽屉都补,
+                           否则外壳看起来是「普通边框」而不是被光照亮的材料 */
                         #acu-app-v2 .acu-v2-app__shell,
                         #acu-app-v2 .acu-dialog,
                         #acu-app-v2 .acu-v2-drawer,
                         #acu-app-v2 .acu-panel,
                         #acu-app-v2 .acu-v2-app__theme-menu {
-                            border-top: 1px solid ${borderTop} !important;
+                            border-top: 1px solid rgba(255, 255, 255, 0.7) !important;
                         }
                         #acu-app-v2 .acu-v2-sidebar--desktop { border-right: 1px solid rgba(255, 255, 255, 0.4) !important; }
                         #acu-app-v2 .acu-v2-app__header { border-bottom: 1px solid rgba(255, 255, 255, 0.45) !important; }
-                        /* 内层面板:比 shell 实一档但保持可见透明,让 shell 的模糊
-                           透出来形成玻璃感;柔和投影从 shell 上浮起 */
+                        /* 内层面板:比 shell 实一档但保持可见透明(0.80),让 shell 的模糊
+                           透出来形成毛玻璃感;柔和投影(0.10/y 6px)从 shell 上浮起。
+                           太实(0.85+)会退化成白卡,毛玻璃质感消失。 */
                         #acu-app-v2 .acu-panel,
                         #acu-app-v2 .acu-v2-app__theme-menu {
-                            background: ${panelBg} !important;
+                            background: rgba(255, 255, 255, 0.8) !important;
                             -webkit-backdrop-filter: none !important;
                             backdrop-filter: none !important;
                             box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.05) !important;
                         }
-                        /* 浮层:半透明保持玻璃感,投影更深压住遮罩 */
+                        /* 浮层:半透明保持玻璃感(0.82,别做实色),投影更深压住遮罩 */
                         #acu-app-v2 .acu-dialog,
                         #acu-app-v2 .acu-v2-drawer {
-                            background: ${floatBg} !important;
+                            background: rgba(255, 255, 255, 0.82) !important;
                             box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08) !important;
                         }
                         /* 表格:表头加极淡底与 shell 区分,行分隔线用淡灰(不再是隐形白边) */
@@ -453,7 +430,7 @@
                         }
                         /* 仪表盘健康卡:面板同款浮起 */
                         #acu-app-v2 .acu-dashboard-page__health-item {
-                            background: ${panelBg} !important;
+                            background: rgba(255, 255, 255, 0.8) !important;
                             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07) !important;
                         }
                         /* 弹层遮罩轻压暗 + 模糊,替掉 DB 默认纯色压暗 */
@@ -465,9 +442,7 @@
                             #acu-app-v2 .acu-v2-app__shell,
                             #acu-app-v2 .acu-dialog-layer,
                             #acu-app-v2 .acu-v2-drawer-layer,
-                            #acu-app-v2 .acu-v2-app__mobile-nav-layer,
-                            #acu-app-v2 .acu-v2-sidebar--desktop,
-                            #acu-app-v2 .acu-v2-app__header {
+                            #acu-app-v2 .acu-v2-app__mobile-nav-layer {
                                 background: #f5f5f7 !important;
                                 -webkit-backdrop-filter: none !important;
                                 backdrop-filter: none !important;
@@ -475,8 +450,7 @@
                             #acu-app-v2 .acu-panel,
                             #acu-app-v2 .acu-dialog,
                             #acu-app-v2 .acu-v2-drawer,
-                            #acu-app-v2 .acu-v2-app__theme-menu,
-                            #acu-app-v2 .acu-dashboard-page__health-item {
+                            #acu-app-v2 .acu-v2-app__theme-menu {
                                 background: #ffffff !important;
                             }
                         }
@@ -484,9 +458,7 @@
                             #acu-app-v2 .acu-v2-app__shell,
                             #acu-app-v2 .acu-dialog-layer,
                             #acu-app-v2 .acu-v2-drawer-layer,
-                            #acu-app-v2 .acu-v2-app__mobile-nav-layer,
-                            #acu-app-v2 .acu-v2-sidebar--desktop,
-                            #acu-app-v2 .acu-v2-app__header {
+                            #acu-app-v2 .acu-v2-app__mobile-nav-layer {
                                 background: #f5f5f7 !important;
                                 -webkit-backdrop-filter: none !important;
                                 backdrop-filter: none !important;
@@ -494,19 +466,259 @@
                             #acu-app-v2 .acu-panel,
                             #acu-app-v2 .acu-dialog,
                             #acu-app-v2 .acu-v2-drawer,
-                            #acu-app-v2 .acu-v2-app__theme-menu,
-                            #acu-app-v2 .acu-dashboard-page__health-item {
+                            #acu-app-v2 .acu-v2-app__theme-menu {
                                 background: #ffffff !important;
                             }
                         }
                     </style>
                 `;
-                if ($glass.length) $glass.replaceWith(css); else $('head').append(css);
+                if ($apple.length) $apple.replaceWith(css); else $('head').append(css);
             };
-            injectGlass();
+            injectApple();
             return;
         } else {
-            $glass.remove();
+            $apple.remove();
+        }
+        if (config.dbTheme && config.dbTheme !== 'default') {
+            const t = THEME_VARS[config.dbTheme] || THEME_VARS.aurora;
+            let h = HIGHLIGHT_COLORS[config.highlightColor];
+            if (!h && config.highlightColor && String(config.highlightColor).startsWith('#')) {
+                h = { main: config.highlightColor, bg: config.highlightColor + '1a' };
+            }
+            h = h || HIGHLIGHT_COLORS.orange;
+            const fontVal = FONTS.find(f => f.id === config.fontFamily)?.val || FONTS[0].val;
+            
+            let finalBg0 = t.bgPanel;
+            let finalBg1 = t.bgNav;
+            
+
+
+            const css = `
+                <style id="acu-db-beautify">
+                    
+                    html body .auto-card-updater-popup .button-group.acu-data-mgmt-buttons button,
+                    html body .auto-card-updater-popup .button-group.acu-data-mgmt-buttons .button,
+                    :not(#z):not(#z) .auto-card-updater-popup .acu-data-mgmt-buttons button,
+                    :not(#z):not(#z) .auto-card-updater-popup .acu-data-mgmt-buttons .button {
+                        background: ${t.btnBg} !important;
+                        color: ${t.textMain} !important;
+                        border: 1px solid ${t.border} !important;
+                        opacity: 1 !important;
+                        box-shadow: none !important;
+                    }
+                    :not(#z):not(#z) .auto-card-updater-popup .acu-data-mgmt-buttons button:hover,
+                    :not(#z):not(#z) .auto-card-updater-popup .acu-data-mgmt-buttons .button:hover {
+                        background: ${t.btnHover} !important;
+                    }
+
+                    
+                    .auto-card-updater-popup .acu-header {
+                        box-shadow: none !important;
+                        background: ${t.bgNav} !important;
+                        border-bottom: 1px solid ${t.border} !important;
+                    }
+
+                    
+                    .acu-window {
+                        background: ${t.bgPanel} !important;
+                        box-shadow: ${t.shadow} !important;
+                        border: 1px solid ${t.border} !important;
+                    }
+                    
+                    .acu-window .acu-window-header {
+                        background: ${t.bgNav} !important;
+                        border-bottom: 1px solid ${t.border} !important;
+                    }
+                    
+                    .acu-window .acu-window-title {
+                        color: ${t.textMain} !important;
+                    }
+                    .acu-window .acu-window-title i {
+                        color: ${h.main} !important;
+                    }
+                    .acu-window .acu-window-btn {
+                        background: ${t.btnBg} !important;
+                        color: ${t.textSub} !important;
+                        border: 1px solid ${t.border} !important;
+                    }
+                    .acu-window .acu-window-btn:hover {
+                        background: ${t.btnHover} !important;
+                        color: ${t.textMain} !important;
+                    }
+
+                    
+                    html body .auto-card-updater-popup .acu-tabs-nav,
+                    .auto-card-updater-popup .acu-tabs-nav {
+                        background: ${t.bgNav} !important;
+                        border-color: ${t.border} !important;
+                        
+                        opacity: 1 !important;
+                    }
+
+                    
+                    .auto-card-updater-popup .acu-tab-button {
+                        color: ${t.textSub} !important;
+                        border-radius: 8px !important;
+                    }
+                    .auto-card-updater-popup .acu-tab-button:hover {
+                        background: ${t.btnHover} !important;
+                        color: ${t.textMain} !important;
+                    }
+                    .auto-card-updater-popup .acu-tab-button.active {
+                        background: ${t.btnActiveBg} !important;
+                        color: ${t.btnActiveText} !important;
+                        box-shadow: 0 2px 6px rgba(0,0,0,0.15) !important; 
+                        border-color: transparent !important;
+                    }
+
+                    .acu-window-overlay {
+                        background-color: ${t.overlayBg} !important;
+                        backdrop-filter: blur(5px) !important;
+                    }
+                    .auto-card-updater-popup {
+                        --acu-bg-0: ${finalBg0} !important;
+                        --acu-bg-1: ${finalBg1} !important;
+                        --acu-bg-2: ${t.btnBg} !important;
+                        --acu-border: ${t.border} !important;
+                        --acu-border-2: ${t.border} !important;
+                        --acu-text-1: ${t.textMain} !important;
+                        --acu-text-2: ${t.textSub} !important;
+                        --acu-text-3: ${t.textSub} !important;
+                        --acu-accent: ${t.uiColor || t.textMain} !important;
+                        --acu-accent-glow: transparent !important;
+                        font-family: ${fontVal} !important;
+                    }
+                                        .auto-card-updater-popup button, .auto-card-updater-popup .button {
+                        border-radius: 8px !important;
+                        background: ${t.btnBg} !important;
+                        color: ${t.textMain} !important;
+                        border: 1px solid ${t.border} !important;
+                    }
+                    .auto-card-updater-popup button:hover, .auto-card-updater-popup .button:hover {
+                        background: ${t.btnHover} !important;
+                    }
+                    .auto-card-updater-popup button.primary, .auto-card-updater-popup .button.primary {
+                        background: ${t.btnActiveBg} !important;
+                        color: ${t.btnActiveText} !important;
+                    }
+                    :not(#z):not(#z) .auto-card-updater-popup input:not([type="checkbox"]):not([type="radio"]),
+                    :not(#z):not(#z) .auto-card-updater-popup textarea {
+                        background-color: ${t.inputBg} !important;
+                        color: ${t.textMain} !important;
+                        border-color: ${t.border} !important;
+                    }
+                    /* 修复：下拉框使用主题搭配色边框 (t.border) */
+                    :not(#z):not(#z) .auto-card-updater-popup select {
+                        background-color: ${t.inputBg} !important;
+                        color: ${t.textMain} !important;
+                        border: 1px solid ${t.border} !important;
+                    }
+                    /* 修复：强制设置下拉选项背景色，防止透明导致看不清 */
+                    :not(#z):not(#z) .auto-card-updater-popup select option {
+                        background-color: ${t.cardBg} !important;
+                        color: ${t.textMain} !important;
+                    }
+                    /* 修复：强制设置输入框占位符颜色，防止美化后说明文字消失 */
+                    :not(#z):not(#z) .auto-card-updater-popup input::placeholder,
+                    :not(#z):not(#z) .auto-card-updater-popup textarea::placeholder {
+                        color: ${t.textSub} !important;
+                        opacity: 0.7 !important;
+                    }
+                    .auto-card-updater-popup [style*="lightgreen"] {
+                        color: ${h.main} !important;
+                    }
+                    /* --- 1. 通用容器美化 --- */
+                    .auto-card-updater-popup .acu-card,
+                    .auto-card-updater-popup .settings-section {
+                        background: ${t.cardBg} !important;
+                        border-color: ${t.border} !important;
+                        color: ${t.textMain} !important;
+                        box-shadow: ${t.shadow} !important;
+                    }
+
+                    /* --- 2. 输入组与列表容器美化 --- */
+                    .auto-card-updater-popup .prompt-segment,
+                    .auto-card-updater-popup .plot-prompt-segment,
+                    .auto-card-updater-popup .qrf_worldbook_list, 
+                    .auto-card-updater-popup .qrf_worldbook_entry_list,
+                    .auto-card-updater-popup .checkbox-group,
+                    .auto-card-updater-popup .qrf_radio_group {
+                        background: ${t.bgNav} !important;
+                        border-color: ${t.border} !important;
+                        color: ${t.textMain} !important;
+                    }
+
+                    /* --- 3. 针对性修复：状态显示框与底部栏 --- */
+                    /* 使用属性选择器匹配 ID 结尾，覆盖数据库脚本硬编码的背景色 */
+                    .auto-card-updater-popup [id$="-card-update-status-display"],
+                    .auto-card-updater-popup [id$="-status-message"],
+                    .auto-card-updater-popup [id$="-loop-status-indicator"] {
+                        background: ${t.bgNav} !important;
+                        border: 1px solid ${t.border} !important;
+                        color: ${t.textMain} !important;
+                        box-shadow: inset 0 1px 4px rgba(0,0,0,0.05) !important;
+                    }
+
+                    /* --- 4. 文本颜色修正 --- */
+                    .auto-card-updater-popup .acu-header-sub,
+                    .auto-card-updater-popup .notes, 
+                    .auto-card-updater-popup small.notes,
+                    .auto-card-updater-popup label {
+                        color: ${t.textSub} !important;
+                    }
+                    .auto-card-updater-popup h3, 
+                    .auto-card-updater-popup h4 {
+                        color: ${t.textMain} !important;
+                        border-bottom-color: ${t.border} !important;
+                    }
+
+                    /* 修复表格内的状态文本颜色 */
+                    .auto-card-updater-popup [id$="-granular-status-table-body"] td {
+                        color: ${t.textMain} !important;
+                    }
+
+                    /* 修复 Toggle Switch (0TK开关) 可见性 */
+                    .auto-card-updater-popup .toggle-switch .slider {
+                        background-color: ${t.border} !important;
+                        border: 1px solid ${t.border} !important;
+                        opacity: 0.6 !important;
+                    }
+                    .auto-card-updater-popup .toggle-switch input:checked + .slider {
+                        background: ${t.btnActiveBg} !important;
+                        border-color: transparent !important;
+                        opacity: 1 !important;
+                    }
+                    .auto-card-updater-popup .toggle-switch .slider:before {
+                        background-color: #fff !important;
+                        box-shadow: 0 1px 3px rgba(0,0,0,0.3) !important;
+                    }
+                    
+                    /* --- 5. 复选框美化 (Checkboxes) - Theme Adaptive (Gradient Fix) --- */
+                    :not(#z) .auto-card-updater-popup input[type="checkbox"] {
+                        background-color: ${t.inputBg} !important;
+                        border: 1px solid ${t.border} !important;
+                        width: 18px !important;
+                        height: 18px !important;
+                        border-radius: 4px !important;
+                        appearance: none !important;
+                        -webkit-appearance: none !important;
+                        cursor: pointer !important;
+                        box-shadow: inset 0 1px 2px rgba(0,0,0,0.1) !important;
+                    }
+                    :not(#z) .auto-card-updater-popup input[type="checkbox"]:checked {
+                        /* 修复：使用 background 简写以支持渐变色主题 (如 Aurora/Sunset) */
+                        background: ${t.btnActiveBg} !important;
+                        border-color: transparent !important;
+                    }
+                    :not(#z) .auto-card-updater-popup input[type="checkbox"]:hover {
+                        border-color: ${t.textMain} !important;
+                    }
+
+                </style>
+            `;
+            if ($style.length) $style.replaceWith(css); else $('head').append(css);
+        } else {
+            $style.remove();
         }
     };
 
@@ -1161,15 +1373,9 @@
                 .acu-cell-menu-item#act-insert { color: #2980b9; }
                 .acu-wrapper button:focus, .acu-edit-dialog button:focus, .acu-cell-menu button:focus { outline: none !important; }
                 
-                
-                .acu-nav-container {
-                    backdrop-filter: blur(16px) saturate(150%);
-                    -webkit-backdrop-filter: blur(16px) saturate(150%);
-                }
-                .acu-data-display {
-                    backdrop-filter: blur(20px) saturate(180%);
-                    -webkit-backdrop-filter: blur(20px) saturate(180%);
-                }
+                /* 历史遗留的无条件 blur 覆盖已移除(16.10.16 卡顿修复):nav-container blur(16px)
+                   与基础规则 blur(5px)重复且更重;data-display 展开时近全屏(95vh),blur(20px)
+                   saturate(180%) = 整屏每帧高斯模糊(卡顿源)。毛玻璃只给局部小面积容器。 */
                 
                 .acu-theme-aurora .acu-data-card::before, .acu-theme-sunset .acu-data-card::before, .acu-theme-starship .acu-data-card::before, .acu-theme-sky .acu-data-card::before {
                     content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
@@ -1827,20 +2033,21 @@
                                 </div>
                             </div>
                             <div class="acu-control-row">
+                                <div class="acu-label-col"><span class="acu-label-main">数据库主题</span></div>
+                                <div class="acu-input-col" style="gap:5px">
+                                    <select id="cfg-db-theme" class="acu-nice-select">
+                                        <option value="default" ${config.dbTheme === 'default' ? 'selected' : ''}>默认主题</option>
+                                        ${THEMES.map(t => `<option value="${t.id}" ${t.id === config.dbTheme ? 'selected' : ''}>${t.name}</option>`).join('')}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="acu-control-row">
                                 <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">数据库UI苹果风</span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">新UI(#acu-app-v2)套苹果毛玻璃,关闭恢复原样</span></div>
                                 <div class="acu-input-col">
                                     <label class="acu-switch">
                                         <input type="checkbox" id="cfg-db-apple-glass" ${config.dbAppleGlass ? 'checked' : ''}>
                                         <span class="acu-slider-switch"></span>
                                     </label>
-                                </div>
-                            </div>
-                            <div class="acu-control-row" id="row-db-accent" style="display:${config.dbAppleGlass ? 'flex' : 'none'}">
-                                <div class="acu-label-col"><span class="acu-label-main">主色调</span></div>
-                                <div class="acu-input-col" style="gap:5px">
-                                    <select id="cfg-db-accent" class="acu-nice-select">
-                                        ${Object.entries(DB_ACCENTS).map(([k, a]) => `<option value="${k}" ${(config.dbAccent || 'blue') === k ? 'selected' : ''}>${a.name}</option>`).join('')}
-                                    </select>
                                 </div>
                             </div>
                             
@@ -2037,14 +2244,14 @@ ${allTableNames.map(tName => {
     return `
         <div class="acu-control-row">
             <div class="acu-label-col">
-                <span class="acu-label-main">${escapeHtml(tName)}</span>
+                <span class="acu-label-main">${tName}</span>
             </div>
             <div class="acu-input-col" style="display:flex; gap:10px; align-items:center;">
                 <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
-                    <input type="checkbox" class="acu-reverse-check" value="${escapeHtml(tName)}" ${isReversed ? 'checked' : ''} style="cursor:pointer;">
+                    <input type="checkbox" class="acu-reverse-check" value="${tName}" ${isReversed ? 'checked' : ''} style="cursor:pointer;">
                     <span style="font-size:12px; color:var(--acu-text-sub);">倒序</span>
                 </label>
-                <i class="fa-solid ${isHidden ? 'fa-eye-slash' : 'fa-eye'} acu-visibility-toggle" data-table="${escapeHtml(tName)}" style="cursor:pointer; color:var(--acu-text-sub); font-size:16px;" title="${isHidden ? '显示' : '隐藏'}表格"></i>
+                <i class="fa-solid ${isHidden ? 'fa-eye-slash' : 'fa-eye'} acu-visibility-toggle" data-table="${tName}" style="cursor:pointer; color:var(--acu-text-sub); font-size:16px;" title="${isHidden ? '显示' : '隐藏'}表格"></i>
             </div>
         </div>
     `;
@@ -2194,17 +2401,13 @@ ${allTableNames.map(tName => {
             }
         });
 
-        dialog.find('#cfg-db-apple-glass').on('change', function() {
-            const checked = $(this).is(':checked');
-            saveConfig({ dbAppleGlass: checked });
-            // 主色调选项只在开启苹果风时显示
-            const $row = dialog.find('#row-db-accent');
-            if (checked) $row.slideDown(150).css('display', 'flex');
-            else $row.slideUp(150);
+        dialog.find('#cfg-db-theme').on('change', function() {
+            const val = $(this).val();
+            saveConfig({ dbTheme: val });
         });
 
-        dialog.find('#cfg-db-accent').on('change', function() {
-            saveConfig({ dbAccent: $(this).val() });
+        dialog.find('#cfg-db-apple-glass').on('change', function() {
+            saveConfig({ dbAppleGlass: $(this).is(':checked') });
         });
 
         dialog.find('.acu-reverse-check').on('change', function() {
@@ -2457,16 +2660,16 @@ ${allTableNames.map(tName => {
 
                 $header.on('click', function(e) {
                     e.stopPropagation();
-                    const currentIsCollapsed = (() => { try { return localStorage.getItem(STORAGE_KEY_OPT_COLLAPSE) === 'true'; } catch (err) { return false; } })();
+                    const currentIsCollapsed = localStorage.getItem(STORAGE_KEY_OPT_COLLAPSE) === 'true';
 
                     if (currentIsCollapsed) {
                         $wrapper.css({ 'max-height': '1000px', 'opacity': '1', 'padding': '8px' });
                         $header.css({ 'border-radius': '12px 12px 0 0', 'margin-bottom': '-1px' });
-                        try { localStorage.setItem(STORAGE_KEY_OPT_COLLAPSE, 'false'); } catch (err) { /* 隐私模式忽略 */ }
+                        localStorage.setItem(STORAGE_KEY_OPT_COLLAPSE, 'false');
                     } else {
                         $wrapper.css({ 'max-height': '0', 'opacity': '0', 'padding': '0' });
                         $header.css({ 'border-radius': '12px', 'margin-bottom': '0' });
-                        try { localStorage.setItem(STORAGE_KEY_OPT_COLLAPSE, 'true'); } catch (err) { /* 隐私模式忽略 */ }
+                        localStorage.setItem(STORAGE_KEY_OPT_COLLAPSE, 'true');
                     }
                 });
 
@@ -2631,7 +2834,7 @@ ${allTableNames.map(tName => {
                               for (let idx = 1; idx < colCount; idx++) {
                                    const cell = (row && row[idx] != null) ? String(row[idx]) : '';
                                    if (cell) {
-                                       buttonsHtml += `<button class="acu-opt-btn" data-val="${encodeURIComponent(cell)}">${escapeHtml(cell)}</button>`;
+                                       buttonsHtml += `<button class="acu-opt-btn" data-val="${encodeURIComponent(cell)}">${cell}</button>`;
                                        hasBtns = true; optBtnCount++;
                                    }
                               }
@@ -2672,7 +2875,7 @@ ${allTableNames.map(tName => {
                 let iconClass = getIconForTableName(name);
 
                 const isActive = currentTabName === name ? 'active' : '';
-                html += `<button class="acu-nav-btn ${isActive}" data-table="${escapeHtml(name)}"><i class="fa-solid ${iconClass}"></i><span>${escapeHtml(name)}</span></button>`;
+                html += `<button class="acu-nav-btn ${isActive}" data-table="${name}"><i class="fa-solid ${iconClass}"></i><span>${name}</span></button>`;
               });
             html += `   </div>
                         <div class="acu-nav-separator"></div>
@@ -2787,8 +2990,8 @@ ${allTableNames.map(tName => {
                 if (cell !== undefined && cell !== null && String(cell).trim() !== '') {
                     itemsHtml += `
                         <div class="acu-dash-stat-row" style="display:flex; justify-content:flex-start; align-items:center; padding:8px 10px; background:var(--acu-btn-bg); border-radius:8px; border:1px solid transparent; width:100%; box-sizing:border-box;">
-                            <span class="acu-dash-stat-label" style="color:var(--acu-title-color); font-size:1em; margin-right:8px; white-space:normal; overflow-wrap:break-word; flex-shrink:0; width:90px;">${escapeHtml(label)}</span>
-                            <span class="acu-dash-stat-val" style="color:var(--acu-text-main); font-weight:bold; font-size:1em; white-space:pre-wrap; word-break:break-word; text-align:left;">${escapeHtml(cell)}</span>
+                            <span class="acu-dash-stat-label" style="color:var(--acu-title-color); font-size:1em; margin-right:8px; white-space:normal; overflow-wrap:break-word; flex-shrink:0; width:90px;">${label}</span>
+                            <span class="acu-dash-stat-val" style="color:var(--acu-text-main); font-weight:bold; font-size:1em; white-space:pre-wrap; word-break:break-word; text-align:left;">${cell}</span>
                         </div>
                     `;
                 }
@@ -2804,7 +3007,7 @@ ${allTableNames.map(tName => {
             const table = key ? tables[key] : null;
 
             if (!table || !table.rows || table.rows.length === 0) {
-                 return `<div style="padding:15px; color:var(--acu-text-sub); font-size:12px; text-align:center;">未找到表格: ${escapeHtml(keyword)}</div>`;
+                 return `<div style="padding:15px; color:var(--acu-text-sub); font-size:12px; text-align:center;">未找到表格: ${keyword}</div>`;
             }
 
             const targetColIdx = (cfg.capCol !== undefined && cfg.capCol !== null) ? parseInt(cfg.capCol) : 1;
@@ -2835,7 +3038,7 @@ ${allTableNames.map(tName => {
                 if (shown >= CAPSULE_RENDER_CAP) { skipped++; continue; }
                 shown++;
                 const flexStyle = capCols === 2 ? 'display:flex; align-items:center; justify-content:center;' : '';
-                itemsHtml += `<div class="acu-dash-npc-item acu-dash-interactive" data-tname="${escapeHtml(key)}" data-row="${rIdx}" data-col="${targetColIdx}" style="cursor:pointer; padding:10px 10px; background:var(--acu-table-head); border-radius:8px; border:1px solid transparent; font-size:0.9em; font-weight:500; transition:all 0.2s; ${flexStyle}">${iconHtml}${escapeHtml(val)}</div>`;
+                itemsHtml += `<div class="acu-dash-npc-item acu-dash-interactive" data-tname="${key}" data-row="${rIdx}" data-col="${targetColIdx}" style="cursor:pointer; padding:10px 10px; background:var(--acu-table-head); border-radius:8px; border:1px solid transparent; font-size:0.9em; font-weight:500; transition:all 0.2s; ${flexStyle}">${iconHtml}${val}</div>`;
             }
             if (skipped > 0) {
                 itemsHtml += `<div style="padding:8px 10px; color:var(--acu-text-sub); font-size:11px; text-align:center; grid-column:1/-1;">仅显示前 ${CAPSULE_RENDER_CAP} 条，另有 ${skipped} 条请到表格页查看</div>`;
@@ -3263,7 +3466,7 @@ ${allTableNames.map(tName => {
     };
 
     const renderTableContent = (tableData, tableName) => {
-        if (!tableData || !tableData.rows.length) return `<div class="acu-panel-header"><div class="acu-panel-title">${escapeHtml(tableName)} ${(tableData && tableData._missingInfo) ? '<span style="color:#e74c3c;font-weight:bold;">缺少' + escapeHtml(tableData._missingInfo) + '</span>' : ((tableData && tableData._hasWarning) ? '<span style="color:#e74c3c;font-weight:bold;">数量异常</span>' : '<span style="color:var(--acu-text-sub);font-weight:normal;">0</span>')}</div><div class="acu-header-actions"><button class="acu-header-btn" id="acu-btn-close" title="关闭"><i class="fa-solid fa-times"></i></button></div></div><div class="acu-panel-content"><div style="text-align:center;color:var(--acu-text-sub);padding:20px;">暂无数据</div></div>`;
+        if (!tableData || !tableData.rows.length) return `<div class="acu-panel-header"><div class="acu-panel-title">${tableName} ${(tableData && tableData._missingInfo) ? '<span style="color:#e74c3c;font-weight:bold;">缺少' + tableData._missingInfo + '</span>' : ((tableData && tableData._hasWarning) ? '<span style="color:#e74c3c;font-weight:bold;">数量异常</span>' : '<span style="color:var(--acu-text-sub);font-weight:normal;">0</span>')}</div><div class="acu-header-actions"><button class="acu-header-btn" id="acu-btn-close" title="关闭"><i class="fa-solid fa-times"></i></button></div></div><div class="acu-panel-content"><div style="text-align:center;color:var(--acu-text-sub);padding:20px;">暂无数据</div></div>`;
         
         const headers = tableData.headers.slice(1);
         let titleColIndex = 1;const codeIdx = tableData.headers.findIndex(h => h && (String(h).includes('编码') || String(h).includes('索引')));if (codeIdx > 0) titleColIndex = codeIdx;
@@ -3358,7 +3561,7 @@ const checkRowChanged = (realIdx, row) => {
         let html = `
             <div class="acu-panel-header">
                   <div class="acu-panel-title">
-                    ${escapeHtml(tableName)} ${(tableData && tableData._missingInfo) ? '<span style="color:#e74c3c;font-weight:bold;">缺少' + escapeHtml(tableData._missingInfo) + '</span>' : ((tableData && tableData._hasWarning) ? '<span style="color:#e74c3c;font-weight:bold;">数量异常</span>' : '<span style="color:var(--acu-text-sub);font-weight:normal;">' + displayTotal + '</span>')}
+                    ${tableName} ${(tableData && tableData._missingInfo) ? '<span style="color:#e74c3c;font-weight:bold;">缺少' + tableData._missingInfo + '</span>' : ((tableData && tableData._hasWarning) ? '<span style="color:#e74c3c;font-weight:bold;">数量异常</span>' : '<span style="color:var(--acu-text-sub);font-weight:normal;">' + displayTotal + '</span>')}
                     ${isBatchMode ? `<span style="margin-left:10px; font-size:12px; color:var(--acu-highlight); background:var(--acu-highlight-bg); padding:2px 8px; border-radius:4px;">已选 ${selectedCount}</span>` : ''}
                 </div>
                 <div class="acu-header-actions">
@@ -3366,7 +3569,7 @@ const checkRowChanged = (realIdx, row) => {
                         <button class="acu-header-btn" id="acu-btn-search-toggle" title="搜索" style="${currentSearchTerm ? 'display:none' : ''}">
                             <i class="fa-solid fa-search"></i>
                         </button>
-                        <input type="text" class="acu-search-input" id="acu-search-input" placeholder="搜索..." value="${escapeHtml(currentSearchTerm)}" style="${currentSearchTerm ? '' : 'display:none'}; width: 120px; margin-right: 4px; padding-left: 10px;" />
+                        <input type="text" class="acu-search-input" id="acu-search-input" placeholder="搜索..." value="${currentSearchTerm}" style="${currentSearchTerm ? '' : 'display:none'}; width: 120px; margin-right: 4px; padding-left: 10px;" />
                         ${isMultiSelectMode ? `
                         <button class="acu-header-btn" id="acu-btn-exit-multiselect" title="退出多选">
                             <i class="fa-solid fa-times"></i>
@@ -3376,10 +3579,10 @@ const checkRowChanged = (realIdx, row) => {
                             <i class="fa-solid fa-check-square"></i>
                         </button>
                         `}
-                        <button class="acu-header-btn" id="acu-btn-switch-style" data-table="${escapeHtml(tableName)}" title="切换视图 (当前: ${isListMode?'单列':'双列'})">
+                        <button class="acu-header-btn" id="acu-btn-switch-style" data-table="${tableName}" title="切换视图 (当前: ${isListMode?'单列':'双列'})">
                             <i class="fa-solid ${isListMode ? 'fa-list' : 'fa-th-large'}"></i>
                         </button>
-                        <button class="acu-header-btn acu-height-drag-handle" data-table="${escapeHtml(tableName)}" title="按住拖动调整高度 (双击重置)">
+                        <button class="acu-header-btn acu-height-drag-handle" data-table="${tableName}" title="按住拖动调整高度 (双击重置)">
                             <i class="fa-solid fa-arrows-up-down"></i>
                         </button>
                         <button class="acu-header-btn" id="acu-btn-refresh" title="刷新数据">
@@ -3402,16 +3605,15 @@ const checkRowChanged = (realIdx, row) => {
             const isRowNew = currentDiffMap.has(`${tableName}-row-${realIndex}`);
             const rowClass = isRowNew && config.highlightNew ? 'acu-highlight-changed' : '';
             const rowKey = `${tableName}-${realIndex}`;
-            const escRowKey = escapeHtml(rowKey);
             const isSelected = selectedRows.has(rowKey);
             const isPendingDelete = pendingDeletes.has(`${tableName}-row-${realIndex}`);
 
-            html += `<div class="acu-data-card ${isSelected ? 'acu-card-selected' : ''}" data-row-key="${escRowKey}">
+            html += `<div class="acu-data-card ${isSelected ? 'acu-card-selected' : ''}" data-row-key="${rowKey}">
                         ${isPendingDelete ? '<div class="acu-badge-pending">待删除</div>' : ''}
                         <div class="acu-card-header">
-                            <input type=\"checkbox\" class=\"acu-card-checkbox\" data-row-key=\"${escRowKey}\" ${isSelected ? 'checked' : ''} style=\"${isMultiSelectMode ? 'visibility:visible;' : 'visibility:hidden;'}\">
+                            <input type=\"checkbox\" class=\"acu-card-checkbox\" data-row-key=\"${rowKey}\" ${isSelected ? 'checked' : ''} style=\"${isMultiSelectMode ? 'visibility:visible;' : 'visibility:hidden;'}\">
                             <span class="acu-card-index">${showDefaultIndex ? '#' + (realIndex + 1) : ''}</span>
-                            <span class="acu-cell acu-editable-title" data-key="${tableData.key}" data-tname="${escapeHtml(tableName)}" data-row="${realIndex}" data-col="${titleColIndex}" title="点击编辑标题">${escapeHtml(cardTitle)}</span>
+                            <span class="acu-cell acu-editable-title" data-key="${tableData.key}" data-tname="${tableName}" data-row="${realIndex}" data-col="${titleColIndex}" title="点击编辑标题">${cardTitle}</span>
                         </div>
                         <div class="acu-card-body">`;
             let gridHtml = ''; let fullHtml = '';
@@ -3429,23 +3631,20 @@ const checkRowChanged = (realIdx, row) => {
                     // 涨到 560KB（4.2 倍），200 字时 180KB → 1029KB（5.7 倍），而这段
                     // 内容只是页面上已经显示过的文字的副本。
                     // 单元格已带 key/row/col，取值时从数据模型读回即可（见 readCellValue）。
-                    // 所有 DB 来源文本(表名/列名/单元格)经 escapeHtml 转义防存储型 XSS。
-                    const dataAttrs = `data-key="${tableData.key}" data-tname="${escapeHtml(tableName)}" data-row="${realIndex}" data-col="${cIdx}"`;
-                    const escHeader = escapeHtml(headerName);
-                    const escCell = escapeHtml(displayCell);
-                    const contentHtml = badgeStyle ? `<span class="acu-badge ${badgeStyle}">${escCell}</span>` : escCell;
+                    const dataAttrs = `data-key="${tableData.key}" data-tname="${tableName}" data-row="${realIndex}" data-col="${cIdx}"`;
+                    const contentHtml = badgeStyle ? `<span class="acu-badge ${badgeStyle}">${displayCell}</span>` : displayCell;
 
                     if (isListMode) {
-                         fullHtml += `<div class="acu-cell acu-inline-item" ${dataAttrs}><div class="acu-inline-label">${escHeader}</div><div class="acu-inline-value ${cellHighlight}">${contentHtml}</div></div>`;
+                         fullHtml += `<div class="acu-cell acu-inline-item" ${dataAttrs}><div class="acu-inline-label">${headerName}</div><div class="acu-inline-value ${cellHighlight}">${contentHtml}</div></div>`;
                     } else {
                          if (codeIdx > 0) {
-                             fullHtml += `<div class="acu-cell acu-full-item" ${dataAttrs}><div class="acu-full-label">${escHeader}</div><div class="acu-full-value ${cellHighlight}">${escCell}</div></div>`;
+                             fullHtml += `<div class="acu-cell acu-full-item" ${dataAttrs}><div class="acu-full-label">${headerName}</div><div class="acu-full-value ${cellHighlight}">${displayCell}</div></div>`;
                          } else {
                             if (cellStr.length > 50) {
-                                fullHtml += `<div class="acu-cell acu-full-item" ${dataAttrs}><div class="acu-full-label">${escHeader}</div><div class="acu-full-value ${cellHighlight}">${escCell}</div></div>`;
+                                fullHtml += `<div class="acu-cell acu-full-item" ${dataAttrs}><div class="acu-full-label">${headerName}</div><div class="acu-full-value ${cellHighlight}">${displayCell}</div></div>`;
                             }
                             else {
-                                gridHtml += `<div class="acu-cell acu-grid-item" ${dataAttrs}><div class="acu-grid-label">${escHeader}</div><div class="acu-grid-value ${cellHighlight}">${contentHtml}</div></div>`;
+                                gridHtml += `<div class="acu-cell acu-grid-item" ${dataAttrs}><div class="acu-grid-label">${headerName}</div><div class="acu-grid-value ${cellHighlight}">${contentHtml}</div></div>`;
                             }
                          }
                     }
@@ -3841,7 +4040,7 @@ const checkRowChanged = (realIdx, row) => {
             updateDynamicActionButton();
         };
 
-        const toggleUI = () => { isCollapsed = !isCollapsed; try { localStorage.setItem(STORAGE_KEY_UI_COLLAPSE, isCollapsed); } catch (e) { /* 隐私模式忽略 */ } renderInterface(false); };
+        const toggleUI = () => { isCollapsed = !isCollapsed; localStorage.setItem(STORAGE_KEY_UI_COLLAPSE, isCollapsed); renderInterface(false); };
         $('#acu-btn-toggle').off('click').on('click', (e) => { e.stopPropagation(); if (isEditingOrder) return; toggleUI(); });
         if (isCollapsed) { $('.acu-nav-container').off('click').on('click', (e) => { e.stopPropagation(); toggleUI(); }); }
         
@@ -4117,17 +4316,15 @@ const checkRowChanged = (realIdx, row) => {
                 const displayCell = cellStr.trim();
                 if (displayCell === 'auto_merged') return;
                 const badgeStyle = getBadgeStyle(displayCell);
-                const escHeader = escapeHtml(headerName);
-                const escCell = escapeHtml(displayCell);
-                const contentHtml = badgeStyle ? `<span class="acu-badge ${badgeStyle}">${escCell}</span>` : escCell;
+                const contentHtml = badgeStyle ? `<span class="acu-badge ${badgeStyle}">${displayCell}</span>` : displayCell;
                 
                 if (currentStyle === 'list' || codeIdx > 0) {
-                     fullHtml += `<div class="acu-cell acu-inline-item" style="cursor:default"><div class="acu-inline-label">${escHeader}</div><div class="acu-inline-value">${contentHtml}</div></div>`;
+                     fullHtml += `<div class="acu-cell acu-inline-item" style="cursor:default"><div class="acu-inline-label">${headerName}</div><div class="acu-inline-value">${contentHtml}</div></div>`;
                 } else {
                      if (cellStr.length > 50) {
-                        fullHtml += `<div class="acu-cell acu-full-item" style="cursor:default"><div class="acu-full-label">${escHeader}</div><div class="acu-full-value">${escCell}</div></div>`;
+                        fullHtml += `<div class="acu-cell acu-full-item" style="cursor:default"><div class="acu-full-label">${headerName}</div><div class="acu-full-value">${displayCell}</div></div>`;
                      } else {
-                        gridHtml += `<div class="acu-cell acu-grid-item" style="cursor:default"><div class="acu-grid-label">${escHeader}</div><div class="acu-grid-value">${contentHtml}</div></div>`;
+                        gridHtml += `<div class="acu-cell acu-grid-item" style="cursor:default"><div class="acu-grid-label">${headerName}</div><div class="acu-grid-value">${contentHtml}</div></div>`;
                      }
                 }
              }
@@ -4137,7 +4334,7 @@ const checkRowChanged = (realIdx, row) => {
             <div class="acu-quick-view-overlay${overlayThemeClass(config.theme)}">
                 <div class="acu-quick-view-card acu-theme-${config.theme}" style="--acu-font-size: ${config.fontSize}px; font-size: ${config.fontSize}px; --acu-text-max-height:${config.limitLongText!==false?'80px':'none'}; --acu-text-overflow:${config.limitLongText!==false?'auto':'visible'}">
                      <div class="acu-quick-view-header">
-                        <span><i class="fa-solid ${getIconForTableName(tableName)}"></i> ${escapeHtml(row[(titleColIdx !== undefined && titleColIdx !== null) ? titleColIdx : 1] || '详情')}</span>
+                        <span><i class="fa-solid ${getIconForTableName(tableName)}"></i> ${row[(titleColIdx !== undefined && titleColIdx !== null) ? titleColIdx : 1] || '详情'}</span>
                         <button class="acu-header-btn" id="qv-close"><i class="fa-solid fa-times"></i></button>
                      </div>
                      <div class="acu-quick-view-body">
@@ -4309,7 +4506,7 @@ const checkRowChanged = (realIdx, row) => {
 
                 const badgeStyle = getBadgeStyle(newVal);
                 if (badgeStyle && !$cell.hasClass('acu-editable-title')) {
-                     $displayTarget.html(`<span class="acu-badge ${badgeStyle}">${escapeHtml(newVal)}</span>`);
+                     $displayTarget.html(`<span class="acu-badge ${badgeStyle}">${newVal}</span>`);
                 } else {
                      $displayTarget.text(newVal);
                 }
@@ -4410,8 +4607,8 @@ const checkRowChanged = (realIdx, row) => {
             const val = cell || '';
             return `
                 <div class="acu-card-edit-field">
-                    <label class="acu-card-edit-label">${escapeHtml(headerName)}</label>
-                    <textarea class="acu-card-edit-input" data-col="${idx}" spellcheck="false">${escapeHtml(val)}</textarea>
+                    <label class="acu-card-edit-label">${headerName}</label>
+                    <textarea class="acu-card-edit-input" data-col="${idx}" spellcheck="false">${val}</textarea>
                 </div>`;
         }).join('');
 
@@ -4478,7 +4675,7 @@ const checkRowChanged = (realIdx, row) => {
             <div class="acu-edit-overlay${overlayThemeClass(config.theme)}">
                 <div class="acu-edit-dialog acu-theme-${config.theme}">
                     <div class="acu-edit-title">编辑单元格内容</div>
-                    <textarea class="acu-edit-textarea">${escapeHtml(content)}</textarea>
+                    <textarea class="acu-edit-textarea">${content}</textarea>
                      <div class="acu-dialog-btns">
                         <button class="acu-dialog-btn" id="dlg-cancel"><i class="fa-solid fa-times"></i> 取消</button>
                         <button class="acu-dialog-btn acu-btn-confirm" id="dlg-save"><i class="fa-solid fa-check"></i> 保存</button>
@@ -4543,7 +4740,7 @@ const checkRowChanged = (realIdx, row) => {
                             <label style="font-weight:bold; display:block; margin-bottom:5px;">绑定表格</label>
                             <select id="slot-table" class="acu-nice-select" style="width:100%">
                                 <option value="" ${!activeTableName ? "selected" : ""}>-- 请选择 --</option>
-                                ${tableNames.map(n => `<option value="${escapeHtml(n)}" ${n === activeTableName ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+                                ${tableNames.map(n => `<option value="${n}" ${n === activeTableName ? 'selected' : ''}>${n}</option>`).join('')}
                             </select>
                         </div>
 
@@ -4623,7 +4820,7 @@ const checkRowChanged = (realIdx, row) => {
                 table.rows.forEach(r => {
                     const txt = r[1] || '未命名';
                     const sel = (currentSlotCfg.card === txt) ? 'selected' : '';
-                    $cardSel.append(`<option value="${escapeHtml(txt)}" ${sel}>${escapeHtml(txt)}</option>`);
+                    $cardSel.append(`<option value="${txt}" ${sel}>${txt}</option>`);
                 });
             }
 
@@ -4635,7 +4832,7 @@ const checkRowChanged = (realIdx, row) => {
                     $colsDiv.append(`
                         <label style="display:flex; align-items:center; gap:8px; font-size:12px;">
                             <input type="checkbox" class="acu-kv-col-check" value="${idx}" ${finalChecked}>
-                            <span>${escapeHtml(h)}</span>
+                            <span>${h}</span>
                         </label>
                     `);
                 });
@@ -4648,7 +4845,7 @@ const checkRowChanged = (realIdx, row) => {
                 table.headers.forEach((h, idx) => {
                     if (idx === 0) return;
                     const isSel = (currentSlotCfg.capCol == idx) ? 'selected' : (idx === 1 && currentSlotCfg.capCol === undefined ? 'selected' : '');
-                    $capColSel.append(`<option value="${idx}" ${isSel}>${escapeHtml(h)}</option>`);
+                    $capColSel.append(`<option value="${idx}" ${isSel}>${h}</option>`);
                 });
             }
 
@@ -4796,23 +4993,13 @@ const checkRowChanged = (realIdx, row) => {
                   renderInterface(true);
                  const api = getCore().getDB();
                  if (api.registerTableUpdateCallback) {
-                     // 命名 handler + 先 unregister 再 register(DB 8.9 提供 unregister):
-                     // 防热重载/重复注入时旧闭包 handleUpdate 累积(性能审查第2轮 explore-36)。
-                     // 注:热重载会生成新函数引用,unregister 匹配不到旧闭包的引用,
-                     // 但 DB 侧 register 有去重(includes),同实例内不会重复注册;
-                     // fillStart 回调 DB 未提供 unregister,依赖其去重。
-                     if (api.unregisterTableUpdateCallback) api.unregisterTableUpdateCallback(UpdateController.handleUpdate);
                      api.registerTableUpdateCallback(UpdateController.handleUpdate);
                      if (api.registerTableFillStartCallback) {
                          // 填表开始：存一份快照 + 启动稳定轮询（填表跑完自动兜底刷新）
-                         if (!window.__acuFillStartBound) {
-                             window.__acuFillStartBound = true;
-                             const fillStartHandler = () => {
-                                 try { const c = api.exportTableAsJson(); if (c) saveSnapshot(c); } catch (_) {}
-                                 startFillPoll();
-                             };
-                             api.registerTableFillStartCallback(fillStartHandler);
-                         }
+                         api.registerTableFillStartCallback(() => {
+                             try { const c = api.exportTableAsJson(); if (c) saveSnapshot(c); } catch (_) {}
+                             startFillPoll();
+                         });
                      }
                  }
                  isInitialized = true;
@@ -4820,34 +5007,24 @@ const checkRowChanged = (realIdx, row) => {
                  // 在切换聊天时会被替换为新聊天的数据，但前端缓存不会自动失效；renderInterface(false)
                  // 走缓存路径，会把旧聊天的表显示到新聊天里。
                  // 订阅 ST 的 CHAT_CHANGED 事件，命中时清缓存 + 丢快照 + 强制刷新，杜绝跨聊天串表。
-                 const acuChatChangedHandler = () => {
-                     stopFillPoll();
-                     stopCatchupPoll(); // 切聊天停掉旧追平轮询，防跨聊天误刷新/误 toast
-                     cachedTableData = null;
-                     lastRawTableRef = null;
-                     lastTableSetFingerprint = '';
-                     memorySnapshot_ACU = null;
-                     try { localStorage.removeItem(STORAGE_KEY_LAST_SNAPSHOT); } catch (_) {}
-                     currentDiffMap.clear();
-                     currentPage = 1;
-                     // 性能审查第2轮 explore-36:切聊天还必须清空跨聊天的行级状态,
-                     // 否则旧聊天行键(rowKey 同构)撞上新聊天会误删/误选
-                     selectedRows.clear();
-                     pendingDeletes.clear();
-                     isMultiSelectMode = false;
-                     if (!isEditingOrder) renderInterface(true);
-                 };
                  try {
                      const w = window.parent || window;
                      const ST = w.SillyTavern || window.SillyTavern;
                      const evSrc = ST && ST.eventSource;
                      const evTypes = ST && ST.eventTypes;
                      if (evSrc && typeof evSrc.on === 'function' && evTypes && evTypes.CHAT_CHANGED) {
-                         // 订阅用命名 handler + off 再 on:同实例内防重复订阅。
-                         // 注:跨 ST 热重载(脚本重注入)会生成新闭包,off 匹配不到旧实例的
-                         // handler,旧闭包仍会累积——本插件无卸载钩子,此为已知局限。
-                         if (typeof evSrc.off === 'function') evSrc.off(evTypes.CHAT_CHANGED, acuChatChangedHandler);
-                         evSrc.on(evTypes.CHAT_CHANGED, acuChatChangedHandler);
+                         evSrc.on(evTypes.CHAT_CHANGED, () => {
+                             stopFillPoll();
+                             stopCatchupPoll(); // 切聊天停掉旧追平轮询，防跨聊天误刷新/误 toast
+                             cachedTableData = null;
+                             lastRawTableRef = null;
+                             lastTableSetFingerprint = '';
+                             memorySnapshot_ACU = null;
+                             try { localStorage.removeItem(STORAGE_KEY_LAST_SNAPSHOT); } catch (_) {}
+                             currentDiffMap.clear();
+                             currentPage = 1;
+                             if (!isEditingOrder) renderInterface(true);
+                         });
                      }
                  } catch (e) { console.warn('[ACU-UI] 订阅 CHAT_CHANGED 失败，串表保护未启用:', e); }
              } else setTimeout(loop, 1000);
