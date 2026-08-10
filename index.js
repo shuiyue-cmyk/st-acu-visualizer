@@ -101,6 +101,7 @@
         frontendPosition: 'bottom',
         dashboardPosition: 'embedded',
         dbTransparentMap: {},
+        visibleColumns: {},
         dbAppleGlass: false,
         dbStyle: 'off',
         dbAccent: 'blue'
@@ -138,6 +139,16 @@
         { id: 'mono', name: '代码等宽', val: `'Consolas', 'Monaco', monospace` },
         { id: 'kaiti', name: '清雅楷体', val: `'KaiTi', 'STKaiti', '楷体', serif` },
     ];
+
+    // HTML 转义工具:防存储型 XSS。数据库表数据(表名/列名/单元格内容)可能含
+    // 用户可控字符串,拼进 HTML 模板前必须转义 & < > " ' 五字符(安全审查
+    // explore-31/32/33 + general-73 独立复核:全文件曾无转义工具,多处注入点)。
+    const escapeHtml = (v) => String(v == null ? '' : v)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 
     const HIGHLIGHT_COLORS = {
         orange: { main: '#d35400', bg: 'rgba(211, 84, 0, 0.1)', name: '活力橙' },
@@ -2026,14 +2037,14 @@ ${allTableNames.map(tName => {
     return `
         <div class="acu-control-row">
             <div class="acu-label-col">
-                <span class="acu-label-main">${tName}</span>
+                <span class="acu-label-main">${escapeHtml(tName)}</span>
             </div>
             <div class="acu-input-col" style="display:flex; gap:10px; align-items:center;">
                 <label style="display:flex; align-items:center; gap:5px; cursor:pointer;">
-                    <input type="checkbox" class="acu-reverse-check" value="${tName}" ${isReversed ? 'checked' : ''} style="cursor:pointer;">
+                    <input type="checkbox" class="acu-reverse-check" value="${escapeHtml(tName)}" ${isReversed ? 'checked' : ''} style="cursor:pointer;">
                     <span style="font-size:12px; color:var(--acu-text-sub);">倒序</span>
                 </label>
-                <i class="fa-solid ${isHidden ? 'fa-eye-slash' : 'fa-eye'} acu-visibility-toggle" data-table="${tName}" style="cursor:pointer; color:var(--acu-text-sub); font-size:16px;" title="${isHidden ? '显示' : '隐藏'}表格"></i>
+                <i class="fa-solid ${isHidden ? 'fa-eye-slash' : 'fa-eye'} acu-visibility-toggle" data-table="${escapeHtml(tName)}" style="cursor:pointer; color:var(--acu-text-sub); font-size:16px;" title="${isHidden ? '显示' : '隐藏'}表格"></i>
             </div>
         </div>
     `;
@@ -2446,16 +2457,16 @@ ${allTableNames.map(tName => {
 
                 $header.on('click', function(e) {
                     e.stopPropagation();
-                    const currentIsCollapsed = localStorage.getItem(STORAGE_KEY_OPT_COLLAPSE) === 'true';
+                    const currentIsCollapsed = (() => { try { return localStorage.getItem(STORAGE_KEY_OPT_COLLAPSE) === 'true'; } catch (err) { return false; } })();
 
                     if (currentIsCollapsed) {
                         $wrapper.css({ 'max-height': '1000px', 'opacity': '1', 'padding': '8px' });
                         $header.css({ 'border-radius': '12px 12px 0 0', 'margin-bottom': '-1px' });
-                        localStorage.setItem(STORAGE_KEY_OPT_COLLAPSE, 'false');
+                        try { localStorage.setItem(STORAGE_KEY_OPT_COLLAPSE, 'false'); } catch (err) { /* 隐私模式忽略 */ }
                     } else {
                         $wrapper.css({ 'max-height': '0', 'opacity': '0', 'padding': '0' });
                         $header.css({ 'border-radius': '12px', 'margin-bottom': '0' });
-                        localStorage.setItem(STORAGE_KEY_OPT_COLLAPSE, 'true');
+                        try { localStorage.setItem(STORAGE_KEY_OPT_COLLAPSE, 'true'); } catch (err) { /* 隐私模式忽略 */ }
                     }
                 });
 
@@ -2620,7 +2631,7 @@ ${allTableNames.map(tName => {
                               for (let idx = 1; idx < colCount; idx++) {
                                    const cell = (row && row[idx] != null) ? String(row[idx]) : '';
                                    if (cell) {
-                                       buttonsHtml += `<button class="acu-opt-btn" data-val="${encodeURIComponent(cell)}">${cell}</button>`;
+                                       buttonsHtml += `<button class="acu-opt-btn" data-val="${encodeURIComponent(cell)}">${escapeHtml(cell)}</button>`;
                                        hasBtns = true; optBtnCount++;
                                    }
                               }
@@ -2661,7 +2672,7 @@ ${allTableNames.map(tName => {
                 let iconClass = getIconForTableName(name);
 
                 const isActive = currentTabName === name ? 'active' : '';
-                html += `<button class="acu-nav-btn ${isActive}" data-table="${name}"><i class="fa-solid ${iconClass}"></i><span>${name}</span></button>`;
+                html += `<button class="acu-nav-btn ${isActive}" data-table="${escapeHtml(name)}"><i class="fa-solid ${iconClass}"></i><span>${escapeHtml(name)}</span></button>`;
               });
             html += `   </div>
                         <div class="acu-nav-separator"></div>
@@ -2776,8 +2787,8 @@ ${allTableNames.map(tName => {
                 if (cell !== undefined && cell !== null && String(cell).trim() !== '') {
                     itemsHtml += `
                         <div class="acu-dash-stat-row" style="display:flex; justify-content:flex-start; align-items:center; padding:8px 10px; background:var(--acu-btn-bg); border-radius:8px; border:1px solid transparent; width:100%; box-sizing:border-box;">
-                            <span class="acu-dash-stat-label" style="color:var(--acu-title-color); font-size:1em; margin-right:8px; white-space:normal; overflow-wrap:break-word; flex-shrink:0; width:90px;">${label}</span>
-                            <span class="acu-dash-stat-val" style="color:var(--acu-text-main); font-weight:bold; font-size:1em; white-space:pre-wrap; word-break:break-word; text-align:left;">${cell}</span>
+                            <span class="acu-dash-stat-label" style="color:var(--acu-title-color); font-size:1em; margin-right:8px; white-space:normal; overflow-wrap:break-word; flex-shrink:0; width:90px;">${escapeHtml(label)}</span>
+                            <span class="acu-dash-stat-val" style="color:var(--acu-text-main); font-weight:bold; font-size:1em; white-space:pre-wrap; word-break:break-word; text-align:left;">${escapeHtml(cell)}</span>
                         </div>
                     `;
                 }
@@ -2793,7 +2804,7 @@ ${allTableNames.map(tName => {
             const table = key ? tables[key] : null;
 
             if (!table || !table.rows || table.rows.length === 0) {
-                 return `<div style="padding:15px; color:var(--acu-text-sub); font-size:12px; text-align:center;">未找到表格: ${keyword}</div>`;
+                 return `<div style="padding:15px; color:var(--acu-text-sub); font-size:12px; text-align:center;">未找到表格: ${escapeHtml(keyword)}</div>`;
             }
 
             const targetColIdx = (cfg.capCol !== undefined && cfg.capCol !== null) ? parseInt(cfg.capCol) : 1;
@@ -2824,7 +2835,7 @@ ${allTableNames.map(tName => {
                 if (shown >= CAPSULE_RENDER_CAP) { skipped++; continue; }
                 shown++;
                 const flexStyle = capCols === 2 ? 'display:flex; align-items:center; justify-content:center;' : '';
-                itemsHtml += `<div class="acu-dash-npc-item acu-dash-interactive" data-tname="${key}" data-row="${rIdx}" data-col="${targetColIdx}" style="cursor:pointer; padding:10px 10px; background:var(--acu-table-head); border-radius:8px; border:1px solid transparent; font-size:0.9em; font-weight:500; transition:all 0.2s; ${flexStyle}">${iconHtml}${val}</div>`;
+                itemsHtml += `<div class="acu-dash-npc-item acu-dash-interactive" data-tname="${escapeHtml(key)}" data-row="${rIdx}" data-col="${targetColIdx}" style="cursor:pointer; padding:10px 10px; background:var(--acu-table-head); border-radius:8px; border:1px solid transparent; font-size:0.9em; font-weight:500; transition:all 0.2s; ${flexStyle}">${iconHtml}${escapeHtml(val)}</div>`;
             }
             if (skipped > 0) {
                 itemsHtml += `<div style="padding:8px 10px; color:var(--acu-text-sub); font-size:11px; text-align:center; grid-column:1/-1;">仅显示前 ${CAPSULE_RENDER_CAP} 条，另有 ${skipped} 条请到表格页查看</div>`;
@@ -3252,7 +3263,7 @@ ${allTableNames.map(tName => {
     };
 
     const renderTableContent = (tableData, tableName) => {
-        if (!tableData || !tableData.rows.length) return `<div class="acu-panel-header"><div class="acu-panel-title">${tableName} ${(tableData && tableData._missingInfo) ? '<span style="color:#e74c3c;font-weight:bold;">缺少' + tableData._missingInfo + '</span>' : ((tableData && tableData._hasWarning) ? '<span style="color:#e74c3c;font-weight:bold;">数量异常</span>' : '<span style="color:var(--acu-text-sub);font-weight:normal;">0</span>')}</div><div class="acu-header-actions"><button class="acu-header-btn" id="acu-btn-close" title="关闭"><i class="fa-solid fa-times"></i></button></div></div><div class="acu-panel-content"><div style="text-align:center;color:var(--acu-text-sub);padding:20px;">暂无数据</div></div>`;
+        if (!tableData || !tableData.rows.length) return `<div class="acu-panel-header"><div class="acu-panel-title">${escapeHtml(tableName)} ${(tableData && tableData._missingInfo) ? '<span style="color:#e74c3c;font-weight:bold;">缺少' + escapeHtml(tableData._missingInfo) + '</span>' : ((tableData && tableData._hasWarning) ? '<span style="color:#e74c3c;font-weight:bold;">数量异常</span>' : '<span style="color:var(--acu-text-sub);font-weight:normal;">0</span>')}</div><div class="acu-header-actions"><button class="acu-header-btn" id="acu-btn-close" title="关闭"><i class="fa-solid fa-times"></i></button></div></div><div class="acu-panel-content"><div style="text-align:center;color:var(--acu-text-sub);padding:20px;">暂无数据</div></div>`;
         
         const headers = tableData.headers.slice(1);
         let titleColIndex = 1;const codeIdx = tableData.headers.findIndex(h => h && (String(h).includes('编码') || String(h).includes('索引')));if (codeIdx > 0) titleColIndex = codeIdx;
@@ -3347,7 +3358,7 @@ const checkRowChanged = (realIdx, row) => {
         let html = `
             <div class="acu-panel-header">
                   <div class="acu-panel-title">
-                    ${tableName} ${(tableData && tableData._missingInfo) ? '<span style="color:#e74c3c;font-weight:bold;">缺少' + tableData._missingInfo + '</span>' : ((tableData && tableData._hasWarning) ? '<span style="color:#e74c3c;font-weight:bold;">数量异常</span>' : '<span style="color:var(--acu-text-sub);font-weight:normal;">' + displayTotal + '</span>')}
+                    ${escapeHtml(tableName)} ${(tableData && tableData._missingInfo) ? '<span style="color:#e74c3c;font-weight:bold;">缺少' + escapeHtml(tableData._missingInfo) + '</span>' : ((tableData && tableData._hasWarning) ? '<span style="color:#e74c3c;font-weight:bold;">数量异常</span>' : '<span style="color:var(--acu-text-sub);font-weight:normal;">' + displayTotal + '</span>')}
                     ${isBatchMode ? `<span style="margin-left:10px; font-size:12px; color:var(--acu-highlight); background:var(--acu-highlight-bg); padding:2px 8px; border-radius:4px;">已选 ${selectedCount}</span>` : ''}
                 </div>
                 <div class="acu-header-actions">
@@ -3355,7 +3366,7 @@ const checkRowChanged = (realIdx, row) => {
                         <button class="acu-header-btn" id="acu-btn-search-toggle" title="搜索" style="${currentSearchTerm ? 'display:none' : ''}">
                             <i class="fa-solid fa-search"></i>
                         </button>
-                        <input type="text" class="acu-search-input" id="acu-search-input" placeholder="搜索..." value="${currentSearchTerm}" style="${currentSearchTerm ? '' : 'display:none'}; width: 120px; margin-right: 4px; padding-left: 10px;" />
+                        <input type="text" class="acu-search-input" id="acu-search-input" placeholder="搜索..." value="${escapeHtml(currentSearchTerm)}" style="${currentSearchTerm ? '' : 'display:none'}; width: 120px; margin-right: 4px; padding-left: 10px;" />
                         ${isMultiSelectMode ? `
                         <button class="acu-header-btn" id="acu-btn-exit-multiselect" title="退出多选">
                             <i class="fa-solid fa-times"></i>
@@ -3365,10 +3376,10 @@ const checkRowChanged = (realIdx, row) => {
                             <i class="fa-solid fa-check-square"></i>
                         </button>
                         `}
-                        <button class="acu-header-btn" id="acu-btn-switch-style" data-table="${tableName}" title="切换视图 (当前: ${isListMode?'单列':'双列'})">
+                        <button class="acu-header-btn" id="acu-btn-switch-style" data-table="${escapeHtml(tableName)}" title="切换视图 (当前: ${isListMode?'单列':'双列'})">
                             <i class="fa-solid ${isListMode ? 'fa-list' : 'fa-th-large'}"></i>
                         </button>
-                        <button class="acu-header-btn acu-height-drag-handle" data-table="${tableName}" title="按住拖动调整高度 (双击重置)">
+                        <button class="acu-header-btn acu-height-drag-handle" data-table="${escapeHtml(tableName)}" title="按住拖动调整高度 (双击重置)">
                             <i class="fa-solid fa-arrows-up-down"></i>
                         </button>
                         <button class="acu-header-btn" id="acu-btn-refresh" title="刷新数据">
@@ -3391,15 +3402,16 @@ const checkRowChanged = (realIdx, row) => {
             const isRowNew = currentDiffMap.has(`${tableName}-row-${realIndex}`);
             const rowClass = isRowNew && config.highlightNew ? 'acu-highlight-changed' : '';
             const rowKey = `${tableName}-${realIndex}`;
+            const escRowKey = escapeHtml(rowKey);
             const isSelected = selectedRows.has(rowKey);
             const isPendingDelete = pendingDeletes.has(`${tableName}-row-${realIndex}`);
 
-            html += `<div class="acu-data-card ${isSelected ? 'acu-card-selected' : ''}" data-row-key="${rowKey}">
+            html += `<div class="acu-data-card ${isSelected ? 'acu-card-selected' : ''}" data-row-key="${escRowKey}">
                         ${isPendingDelete ? '<div class="acu-badge-pending">待删除</div>' : ''}
                         <div class="acu-card-header">
-                            <input type=\"checkbox\" class=\"acu-card-checkbox\" data-row-key=\"${rowKey}\" ${isSelected ? 'checked' : ''} style=\"${isMultiSelectMode ? 'visibility:visible;' : 'visibility:hidden;'}\">
+                            <input type=\"checkbox\" class=\"acu-card-checkbox\" data-row-key=\"${escRowKey}\" ${isSelected ? 'checked' : ''} style=\"${isMultiSelectMode ? 'visibility:visible;' : 'visibility:hidden;'}\">
                             <span class="acu-card-index">${showDefaultIndex ? '#' + (realIndex + 1) : ''}</span>
-                            <span class="acu-cell acu-editable-title" data-key="${tableData.key}" data-tname="${tableName}" data-row="${realIndex}" data-col="${titleColIndex}" title="点击编辑标题">${cardTitle}</span>
+                            <span class="acu-cell acu-editable-title" data-key="${tableData.key}" data-tname="${escapeHtml(tableName)}" data-row="${realIndex}" data-col="${titleColIndex}" title="点击编辑标题">${escapeHtml(cardTitle)}</span>
                         </div>
                         <div class="acu-card-body">`;
             let gridHtml = ''; let fullHtml = '';
@@ -3417,20 +3429,23 @@ const checkRowChanged = (realIdx, row) => {
                     // 涨到 560KB（4.2 倍），200 字时 180KB → 1029KB（5.7 倍），而这段
                     // 内容只是页面上已经显示过的文字的副本。
                     // 单元格已带 key/row/col，取值时从数据模型读回即可（见 readCellValue）。
-                    const dataAttrs = `data-key="${tableData.key}" data-tname="${tableName}" data-row="${realIndex}" data-col="${cIdx}"`;
-                    const contentHtml = badgeStyle ? `<span class="acu-badge ${badgeStyle}">${displayCell}</span>` : displayCell;
+                    // 所有 DB 来源文本(表名/列名/单元格)经 escapeHtml 转义防存储型 XSS。
+                    const dataAttrs = `data-key="${tableData.key}" data-tname="${escapeHtml(tableName)}" data-row="${realIndex}" data-col="${cIdx}"`;
+                    const escHeader = escapeHtml(headerName);
+                    const escCell = escapeHtml(displayCell);
+                    const contentHtml = badgeStyle ? `<span class="acu-badge ${badgeStyle}">${escCell}</span>` : escCell;
 
                     if (isListMode) {
-                         fullHtml += `<div class="acu-cell acu-inline-item" ${dataAttrs}><div class="acu-inline-label">${headerName}</div><div class="acu-inline-value ${cellHighlight}">${contentHtml}</div></div>`;
+                         fullHtml += `<div class="acu-cell acu-inline-item" ${dataAttrs}><div class="acu-inline-label">${escHeader}</div><div class="acu-inline-value ${cellHighlight}">${contentHtml}</div></div>`;
                     } else {
                          if (codeIdx > 0) {
-                             fullHtml += `<div class="acu-cell acu-full-item" ${dataAttrs}><div class="acu-full-label">${headerName}</div><div class="acu-full-value ${cellHighlight}">${displayCell}</div></div>`;
+                             fullHtml += `<div class="acu-cell acu-full-item" ${dataAttrs}><div class="acu-full-label">${escHeader}</div><div class="acu-full-value ${cellHighlight}">${escCell}</div></div>`;
                          } else {
                             if (cellStr.length > 50) {
-                                fullHtml += `<div class="acu-cell acu-full-item" ${dataAttrs}><div class="acu-full-label">${headerName}</div><div class="acu-full-value ${cellHighlight}">${displayCell}</div></div>`;
+                                fullHtml += `<div class="acu-cell acu-full-item" ${dataAttrs}><div class="acu-full-label">${escHeader}</div><div class="acu-full-value ${cellHighlight}">${escCell}</div></div>`;
                             }
                             else {
-                                gridHtml += `<div class="acu-cell acu-grid-item" ${dataAttrs}><div class="acu-grid-label">${headerName}</div><div class="acu-grid-value ${cellHighlight}">${contentHtml}</div></div>`;
+                                gridHtml += `<div class="acu-cell acu-grid-item" ${dataAttrs}><div class="acu-grid-label">${escHeader}</div><div class="acu-grid-value ${cellHighlight}">${contentHtml}</div></div>`;
                             }
                          }
                     }
@@ -3826,7 +3841,7 @@ const checkRowChanged = (realIdx, row) => {
             updateDynamicActionButton();
         };
 
-        const toggleUI = () => { isCollapsed = !isCollapsed; localStorage.setItem(STORAGE_KEY_UI_COLLAPSE, isCollapsed); renderInterface(false); };
+        const toggleUI = () => { isCollapsed = !isCollapsed; try { localStorage.setItem(STORAGE_KEY_UI_COLLAPSE, isCollapsed); } catch (e) { /* 隐私模式忽略 */ } renderInterface(false); };
         $('#acu-btn-toggle').off('click').on('click', (e) => { e.stopPropagation(); if (isEditingOrder) return; toggleUI(); });
         if (isCollapsed) { $('.acu-nav-container').off('click').on('click', (e) => { e.stopPropagation(); toggleUI(); }); }
         
@@ -4102,15 +4117,17 @@ const checkRowChanged = (realIdx, row) => {
                 const displayCell = cellStr.trim();
                 if (displayCell === 'auto_merged') return;
                 const badgeStyle = getBadgeStyle(displayCell);
-                const contentHtml = badgeStyle ? `<span class="acu-badge ${badgeStyle}">${displayCell}</span>` : displayCell;
+                const escHeader = escapeHtml(headerName);
+                const escCell = escapeHtml(displayCell);
+                const contentHtml = badgeStyle ? `<span class="acu-badge ${badgeStyle}">${escCell}</span>` : escCell;
                 
                 if (currentStyle === 'list' || codeIdx > 0) {
-                     fullHtml += `<div class="acu-cell acu-inline-item" style="cursor:default"><div class="acu-inline-label">${headerName}</div><div class="acu-inline-value">${contentHtml}</div></div>`;
+                     fullHtml += `<div class="acu-cell acu-inline-item" style="cursor:default"><div class="acu-inline-label">${escHeader}</div><div class="acu-inline-value">${contentHtml}</div></div>`;
                 } else {
                      if (cellStr.length > 50) {
-                        fullHtml += `<div class="acu-cell acu-full-item" style="cursor:default"><div class="acu-full-label">${headerName}</div><div class="acu-full-value">${displayCell}</div></div>`;
+                        fullHtml += `<div class="acu-cell acu-full-item" style="cursor:default"><div class="acu-full-label">${escHeader}</div><div class="acu-full-value">${escCell}</div></div>`;
                      } else {
-                        gridHtml += `<div class="acu-cell acu-grid-item" style="cursor:default"><div class="acu-grid-label">${headerName}</div><div class="acu-grid-value">${contentHtml}</div></div>`;
+                        gridHtml += `<div class="acu-cell acu-grid-item" style="cursor:default"><div class="acu-grid-label">${escHeader}</div><div class="acu-grid-value">${contentHtml}</div></div>`;
                      }
                 }
              }
@@ -4120,7 +4137,7 @@ const checkRowChanged = (realIdx, row) => {
             <div class="acu-quick-view-overlay${overlayThemeClass(config.theme)}">
                 <div class="acu-quick-view-card acu-theme-${config.theme}" style="--acu-font-size: ${config.fontSize}px; font-size: ${config.fontSize}px; --acu-text-max-height:${config.limitLongText!==false?'80px':'none'}; --acu-text-overflow:${config.limitLongText!==false?'auto':'visible'}">
                      <div class="acu-quick-view-header">
-                        <span><i class="fa-solid ${getIconForTableName(tableName)}"></i> ${row[(titleColIdx !== undefined && titleColIdx !== null) ? titleColIdx : 1] || '详情'}</span>
+                        <span><i class="fa-solid ${getIconForTableName(tableName)}"></i> ${escapeHtml(row[(titleColIdx !== undefined && titleColIdx !== null) ? titleColIdx : 1] || '详情')}</span>
                         <button class="acu-header-btn" id="qv-close"><i class="fa-solid fa-times"></i></button>
                      </div>
                      <div class="acu-quick-view-body">
@@ -4292,7 +4309,7 @@ const checkRowChanged = (realIdx, row) => {
 
                 const badgeStyle = getBadgeStyle(newVal);
                 if (badgeStyle && !$cell.hasClass('acu-editable-title')) {
-                     $displayTarget.html(`<span class="acu-badge ${badgeStyle}">${newVal}</span>`);
+                     $displayTarget.html(`<span class="acu-badge ${badgeStyle}">${escapeHtml(newVal)}</span>`);
                 } else {
                      $displayTarget.text(newVal);
                 }
@@ -4393,8 +4410,8 @@ const checkRowChanged = (realIdx, row) => {
             const val = cell || '';
             return `
                 <div class="acu-card-edit-field">
-                    <label class="acu-card-edit-label">${headerName}</label>
-                    <textarea class="acu-card-edit-input" data-col="${idx}" spellcheck="false">${val}</textarea>
+                    <label class="acu-card-edit-label">${escapeHtml(headerName)}</label>
+                    <textarea class="acu-card-edit-input" data-col="${idx}" spellcheck="false">${escapeHtml(val)}</textarea>
                 </div>`;
         }).join('');
 
@@ -4461,7 +4478,7 @@ const checkRowChanged = (realIdx, row) => {
             <div class="acu-edit-overlay${overlayThemeClass(config.theme)}">
                 <div class="acu-edit-dialog acu-theme-${config.theme}">
                     <div class="acu-edit-title">编辑单元格内容</div>
-                    <textarea class="acu-edit-textarea">${content}</textarea>
+                    <textarea class="acu-edit-textarea">${escapeHtml(content)}</textarea>
                      <div class="acu-dialog-btns">
                         <button class="acu-dialog-btn" id="dlg-cancel"><i class="fa-solid fa-times"></i> 取消</button>
                         <button class="acu-dialog-btn acu-btn-confirm" id="dlg-save"><i class="fa-solid fa-check"></i> 保存</button>
@@ -4526,7 +4543,7 @@ const checkRowChanged = (realIdx, row) => {
                             <label style="font-weight:bold; display:block; margin-bottom:5px;">绑定表格</label>
                             <select id="slot-table" class="acu-nice-select" style="width:100%">
                                 <option value="" ${!activeTableName ? "selected" : ""}>-- 请选择 --</option>
-                                ${tableNames.map(n => `<option value="${n}" ${n === activeTableName ? 'selected' : ''}>${n}</option>`).join('')}
+                                ${tableNames.map(n => `<option value="${escapeHtml(n)}" ${n === activeTableName ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
                             </select>
                         </div>
 
@@ -4606,7 +4623,7 @@ const checkRowChanged = (realIdx, row) => {
                 table.rows.forEach(r => {
                     const txt = r[1] || '未命名';
                     const sel = (currentSlotCfg.card === txt) ? 'selected' : '';
-                    $cardSel.append(`<option value="${txt}" ${sel}>${txt}</option>`);
+                    $cardSel.append(`<option value="${escapeHtml(txt)}" ${sel}>${escapeHtml(txt)}</option>`);
                 });
             }
 
@@ -4618,7 +4635,7 @@ const checkRowChanged = (realIdx, row) => {
                     $colsDiv.append(`
                         <label style="display:flex; align-items:center; gap:8px; font-size:12px;">
                             <input type="checkbox" class="acu-kv-col-check" value="${idx}" ${finalChecked}>
-                            <span>${h}</span>
+                            <span>${escapeHtml(h)}</span>
                         </label>
                     `);
                 });
@@ -4631,7 +4648,7 @@ const checkRowChanged = (realIdx, row) => {
                 table.headers.forEach((h, idx) => {
                     if (idx === 0) return;
                     const isSel = (currentSlotCfg.capCol == idx) ? 'selected' : (idx === 1 && currentSlotCfg.capCol === undefined ? 'selected' : '');
-                    $capColSel.append(`<option value="${idx}" ${isSel}>${h}</option>`);
+                    $capColSel.append(`<option value="${idx}" ${isSel}>${escapeHtml(h)}</option>`);
                 });
             }
 
@@ -4793,24 +4810,29 @@ const checkRowChanged = (realIdx, row) => {
                  // 在切换聊天时会被替换为新聊天的数据，但前端缓存不会自动失效；renderInterface(false)
                  // 走缓存路径，会把旧聊天的表显示到新聊天里。
                  // 订阅 ST 的 CHAT_CHANGED 事件，命中时清缓存 + 丢快照 + 强制刷新，杜绝跨聊天串表。
+                 const acuChatChangedHandler = () => {
+                     stopFillPoll();
+                     stopCatchupPoll(); // 切聊天停掉旧追平轮询，防跨聊天误刷新/误 toast
+                     cachedTableData = null;
+                     lastRawTableRef = null;
+                     lastTableSetFingerprint = '';
+                     memorySnapshot_ACU = null;
+                     try { localStorage.removeItem(STORAGE_KEY_LAST_SNAPSHOT); } catch (_) {}
+                     currentDiffMap.clear();
+                     currentPage = 1;
+                     if (!isEditingOrder) renderInterface(true);
+                 };
                  try {
                      const w = window.parent || window;
                      const ST = w.SillyTavern || window.SillyTavern;
                      const evSrc = ST && ST.eventSource;
                      const evTypes = ST && ST.eventTypes;
                      if (evSrc && typeof evSrc.on === 'function' && evTypes && evTypes.CHAT_CHANGED) {
-                         evSrc.on(evTypes.CHAT_CHANGED, () => {
-                             stopFillPoll();
-                             stopCatchupPoll(); // 切聊天停掉旧追平轮询，防跨聊天误刷新/误 toast
-                             cachedTableData = null;
-                             lastRawTableRef = null;
-                             lastTableSetFingerprint = '';
-                             memorySnapshot_ACU = null;
-                             try { localStorage.removeItem(STORAGE_KEY_LAST_SNAPSHOT); } catch (_) {}
-                             currentDiffMap.clear();
-                             currentPage = 1;
-                             if (!isEditingOrder) renderInterface(true);
-                         });
+                         // 订阅用命名 handler + off 再 on:同实例内防重复订阅。
+                         // 注:跨 ST 热重载(脚本重注入)会生成新闭包,off 匹配不到旧实例的
+                         // handler,旧闭包仍会累积——本插件无卸载钩子,此为已知局限。
+                         if (typeof evSrc.off === 'function') evSrc.off(evTypes.CHAT_CHANGED, acuChatChangedHandler);
+                         evSrc.on(evTypes.CHAT_CHANGED, acuChatChangedHandler);
                      }
                  } catch (e) { console.warn('[ACU-UI] 订阅 CHAT_CHANGED 失败，串表保护未启用:', e); }
              } else setTimeout(loop, 1000);
