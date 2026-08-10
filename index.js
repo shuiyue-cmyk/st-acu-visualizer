@@ -245,7 +245,24 @@
     const saveTableOrder = (tableNames) => { try { localStorage.setItem(STORAGE_KEY_TABLE_ORDER, JSON.stringify(tableNames)); } catch (e) { console.error(e); } };
     const getSavedActionOrder = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_ACTION_ORDER)); } catch (e) { return null; } };
     const saveActionOrder = (list) => { try { localStorage.setItem(STORAGE_KEY_ACTION_ORDER, JSON.stringify(list)); } catch (e) { console.error(e); } };
-    const getConfig = () => { try { const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_CONFIG)); return { ...DEFAULT_CONFIG, ...saved }; } catch (e) { return DEFAULT_CONFIG; } };
+    const getConfig = () => {
+        try {
+            const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_CONFIG));
+            // 配置迁移(16.10.21):液态玻璃时代(16.10.2~12)的「数据库UI风格」下拉,
+            // handler 写 saveConfig({dbStyle, dbAppleGlass: val!=='off'})——用户选「透明玻璃
+            // (clear)」时也连带把 dbAppleGlass 写成 true。clear 已被删除(16.10.13),
+            // 当前版本(16.10.1 基线)注入只认 dbAppleGlass,该残留会让选过液态玻璃的用户
+            // 误注入苹果毛玻璃 → 持续卡顿(实机报告:用过液态玻璃的用户卡,没用过的不卡)。
+            // 迁移:dbStyle==='clear' 的残留一律视为关闭,并一次性写回 localStorage,
+            // 让设置界面开关也同步显示关闭(避免「开关显示开但不生效」的困惑);
+            // dbStyle==='apple' 或手动开开关的真苹果用户不受影响(保持原值)。
+            if (saved && saved.dbStyle === 'clear' && saved.dbAppleGlass) {
+                saved.dbAppleGlass = false;
+                try { localStorage.setItem(STORAGE_KEY_UI_CONFIG, JSON.stringify(saved)); } catch (_) {}
+            }
+            return { ...DEFAULT_CONFIG, ...saved };
+        } catch (e) { return DEFAULT_CONFIG; }
+    };
     const saveConfig = (newConfig) => { const current = getConfig(); const merged = { ...current, ...newConfig }; try { localStorage.setItem(STORAGE_KEY_UI_CONFIG, JSON.stringify(merged)); } catch (e) { console.error(e); } applyConfigStyles(merged); };
     
     const getTableHeights = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_HEIGHTS)) || {}; } catch (e) { return {}; } };
