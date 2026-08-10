@@ -409,14 +409,22 @@
                             --acu-radius-sm: 8px !important;
                             --acu-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06) !important;
                         }
-                        /* 毛玻璃只给外层容器(shell/各弹层)。子元素零 backdrop-filter:
-                           每加一个就是多一个合成层 + 一次对背景的高斯模糊。 */
-                        #acu-app-v2 .acu-v2-app__shell,
+                        /* 毛玻璃只给局部浮层(弹层遮罩/移动导航)。子元素零 backdrop-filter:
+                           每加一个就是多一个合成层 + 一次对背景的高斯模糊。
+                           ⚠️ 全屏 shell(.acu-v2-app__shell 是 fixed inset:0 覆盖整个视口)
+                           不加 backdrop-filter——整屏每帧高斯模糊是性能灾难,实机卡顿
+                           (性能审查第2轮 explore-35:16.10.13 回退时曾带回全屏 blur,
+                           此处显式排除;shell 透出酒馆靠半透明底,玻璃感由弹窗局部 blur
+                           承担)。 */
                         #acu-app-v2 .acu-dialog-layer,
                         #acu-app-v2 .acu-v2-drawer-layer,
                         #acu-app-v2 .acu-v2-app__mobile-nav-layer {
                             -webkit-backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
                             backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
+                        }
+                        #acu-app-v2 .acu-v2-app__shell {
+                            -webkit-backdrop-filter: none !important;
+                            backdrop-filter: none !important;
                         }
                         /* 亮顶边(光打在材料上):所有玻璃容器——shell/侧栏/弹窗/抽屉都补 */
                         #acu-app-v2 .acu-v2-app__shell,
@@ -2619,6 +2627,11 @@ ${allTableNames.map(tName => {
             let optBtnCount = 0; if (optionTables.length > 0 && !hideOptionsUntilUpdate) {
                 let buttonsHtml = '';
                 let hasBtns = false;
+                // 选项按钮封顶(性能审查第2轮 explore-35):大选项表每行每列都生成按钮,
+                // 无界增长会灌爆折叠容器(仿仪表盘胶囊 CAPSULE_RENDER_CAP=60 的做法),
+                // 超出部分用提示条引导去表格页。
+                const OPT_BTN_CAP = 60;
+                let optShown = 0, optSkipped = 0;
                 optionTables.forEach(table => {
                     if(table.rows && Array.isArray(table.headers)) {
                          // 关键修复：按 headers 的列数遍历，而不是按 row 的实际长度。
@@ -2631,13 +2644,17 @@ ${allTableNames.map(tName => {
                               for (let idx = 1; idx < colCount; idx++) {
                                    const cell = (row && row[idx] != null) ? String(row[idx]) : '';
                                    if (cell) {
+                                       if (optShown >= OPT_BTN_CAP) { optSkipped++; continue; }
                                        buttonsHtml += `<button class="acu-opt-btn" data-val="${encodeURIComponent(cell)}">${escapeHtml(cell)}</button>`;
-                                       hasBtns = true; optBtnCount++;
+                                       hasBtns = true; optBtnCount++; optShown++;
                                    }
                               }
                          });
                     }
                 });
+                if (optSkipped > 0) {
+                    buttonsHtml += `<div style="padding:8px 10px; color:var(--acu-text-sub); font-size:11px; text-align:center;">仅显示前 ${OPT_BTN_CAP} 个选项，另有 ${optSkipped} 个请到表格页查看</div>`;
+                }
                 if (hasBtns) {
                     optionBtnContent = buttonsHtml;
                 }
@@ -4796,13 +4813,23 @@ const checkRowChanged = (realIdx, row) => {
                   renderInterface(true);
                  const api = getCore().getDB();
                  if (api.registerTableUpdateCallback) {
+                     // 命名 handler + 先 unregister 再 register(DB 8.9 提供 unregister):
+                     // 防热重载/重复注入时旧闭包 handleUpdate 累积(性能审查第2轮 explore-36)。
+                     // 注:热重载会生成新函数引用,unregister 匹配不到旧闭包的引用,
+                     // 但 DB 侧 register 有去重(includes),同实例内不会重复注册;
+                     // fillStart 回调 DB 未提供 unregister,依赖其去重。
+                     if (api.unregisterTableUpdateCallback) api.unregisterTableUpdateCallback(UpdateController.handleUpdate);
                      api.registerTableUpdateCallback(UpdateController.handleUpdate);
                      if (api.registerTableFillStartCallback) {
                          // 填表开始：存一份快照 + 启动稳定轮询（填表跑完自动兜底刷新）
-                         api.registerTableFillStartCallback(() => {
-                             try { const c = api.exportTableAsJson(); if (c) saveSnapshot(c); } catch (_) {}
-                             startFillPoll();
-                         });
+                         if (!window.__acuFillStartBound) {
+                             window.__acuFillStartBound = true;
+                             const fillStartHandler = () => {
+                                 try { const c = api.exportTableAsJson(); if (c) saveSnapshot(c); } catch (_) {}
+                                 startFillPoll();
+                             };
+                             api.registerTableFillStartCallback(fillStartHandler);
+                         }
                      }
                  }
                  isInitialized = true;
@@ -4820,6 +4847,11 @@ const checkRowChanged = (realIdx, row) => {
                      try { localStorage.removeItem(STORAGE_KEY_LAST_SNAPSHOT); } catch (_) {}
                      currentDiffMap.clear();
                      currentPage = 1;
+                     // 性能审查第2轮 explore-36:切聊天还必须清空跨聊天的行级状态,
+                     // 否则旧聊天行键(rowKey 同构)撞上新聊天会误删/误选
+                     selectedRows.clear();
+                     pendingDeletes.clear();
+                     isMultiSelectMode = false;
                      if (!isEditingOrder) renderInterface(true);
                  };
                  try {
