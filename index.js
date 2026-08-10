@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.1.5'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.1.6'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -2152,8 +2152,9 @@ ${allTableNames.map(tName => {
                             </div>
                             <div class="acu-control-row">
                                 <div class="acu-label-col"><span class="acu-label-main">调试报告</span><span class="acu-label-sub" style="font-weight:normal">开启调试模式→复现问题→生成报告,自动打开 GitHub 预填 issue 页提交</span></div>
-                                <div class="acu-input-col" style="justify-content:flex-end">
+                                <div class="acu-input-col" style="justify-content:flex-end; gap:8px">
                                     <button class="acu-btn-block" id="btn-gen-debug-report" style="margin:0; padding:8px 14px; width:auto;">生成报告</button>
+                                    <a href="https://github.com/shuiyue-cmyk/st-acu-visualizer" target="_blank" rel="noopener noreferrer" class="acu-btn-block" style="margin:0; padding:8px 14px; width:auto; text-decoration:none; display:inline-flex; align-items:center; gap:6px;"><i class="fa-solid fa-star"></i> 给项目点个星</a>
                                 </div>
                             </div>
                             <div class="acu-control-row" style="display:none;" id="row-debug-result">
