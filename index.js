@@ -618,9 +618,10 @@
                         max-width: 100% !important;
                     }
                 }
-                /* 苹果设计主题：毛玻璃材料增强 + 降级兜底 */
+                /* 苹果设计主题：毛玻璃材料增强 + 降级兜底。
+                   注:.acu-data-display 展开时近全屏(95vh),不进 blur 选择器——
+                   全屏高斯模糊是卡顿源(性能审查第3轮 explore-38 定位,与默认主题一致) */
                 .acu-theme-apple .acu-nav-container,
-                .acu-theme-apple .acu-data-display,
                 .acu-theme-apple.acu-embedded-options-container,
                 .acu-theme-apple.acu-embedded-options-container .acu-option-panel,
                 .acu-theme-apple.acu-embedded-options-container .acu-opt-ctrl-bar,
@@ -682,7 +683,6 @@
                    从 1.5ms 涨到 10.3ms。卡片在被模糊过的容器里，靠自身半透明白底就有
                    玻璃质感，不需要自己再模糊一遍背景。 */
                 .acu-theme-blushglass .acu-nav-container,
-                .acu-theme-blushglass .acu-data-display,
                 .acu-theme-blushglass.acu-embedded-options-container,
                 .acu-theme-blushglass.acu-embedded-options-container .acu-option-panel,
                 .acu-theme-blushglass.acu-embedded-options-container .acu-opt-ctrl-bar,
@@ -952,7 +952,9 @@
                 .acu-opt-btn:active { transform: translateY(0); opacity: 0.8; }
                 .acu-opt-header { flex: 0 0 100%; width: 100%; text-align: center; font-size: 12px; font-weight: bold; color: var(--acu-title-color); padding: 2px 0; border-bottom: 1px dashed var(--acu-border); margin-bottom: 4px; opacity: 0.9; }
 
-                .acu-data-display { position: absolute; bottom: calc(100% +  8px); left: 0; right: 0; max-height: 95vh; height: auto; background: var(--acu-bg-panel); border: 1px solid var(--acu-border); border-radius: 12px; box-shadow: 0 12px 40px var(--acu-shadow); display: none; flex-direction: column; z-index: 20002; animation: popUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); backdrop-filter: blur(8px); overflow: hidden; }
+                .acu-data-display { position: absolute; bottom: calc(100% +  8px); left: 0; right: 0; max-height: 95vh; height: auto; background: var(--acu-bg-panel); border: 1px solid var(--acu-border); border-radius: 12px; box-shadow: 0 12px 40px var(--acu-shadow); display: none; flex-direction: column; z-index: 20002; animation: popUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); overflow: hidden; }
+                /* 注:data-display 展开时近全屏(95vh),不加 backdrop-filter——全屏高斯模糊是
+                   性能负担(性能审查第2轮),玻璃感由内部卡片/主题块承担 */
                 .acu-data-display.visible { display: flex; }
                 .acu-no-anim { animation: none !important; transform: none !important; }
                 @keyframes popUp { from { opacity: 0; transform: translateY(15px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
@@ -1169,15 +1171,11 @@
                 .acu-cell-menu-item#act-insert { color: #2980b9; }
                 .acu-wrapper button:focus, .acu-edit-dialog button:focus, .acu-cell-menu button:focus { outline: none !important; }
                 
-                
-                .acu-nav-container {
-                    backdrop-filter: blur(16px) saturate(150%);
-                    -webkit-backdrop-filter: blur(16px) saturate(150%);
-                }
-                .acu-data-display {
-                    backdrop-filter: blur(20px) saturate(180%);
-                    -webkit-backdrop-filter: blur(20px) saturate(180%);
-                }
+                /* 历史遗留(V16.4 起)的无条件 blur 已移除(性能审查第2轮 explore-35 定位):
+                   .acu-nav-container blur(16px) 与 936 的 blur(5px) 重复且更重;
+                   .acu-data-display blur(20px) saturate(180%) 展开时是近全屏(95vh)固定层,
+                   每帧全屏高斯模糊 = 卡顿根源(用户实测「打开数据库UI就卡」)。
+                   毛玻璃只给局部容器,近全屏层不 blur——玻璃感由内部卡片/主题块承担。 */
                 
                 .acu-theme-aurora .acu-data-card::before, .acu-theme-sunset .acu-data-card::before, .acu-theme-starship .acu-data-card::before, .acu-theme-sky .acu-data-card::before {
                     content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
