@@ -372,9 +372,10 @@
                     <style id="acu-v2-apple">
                         /* 苹果毛玻璃材料 token(全 !important 压 DB 侧 applyTheme 重写) */
                         #acu-app-v2 {
-                            /* 三档透明度梯度拉开纵深。shell 最透(0.5,隔层纱:底下酒馆朦胧透出)、
-                               面板次透、灰块再一档,每层之间能透出模糊背景形成层次。 */
-                            --acu-bg-0: rgba(244, 244, 247, 0.5) !important;
+                            /* 三档透明度梯度拉开纵深。shell 半透明(0.62)+ 全屏轻 blur 12px
+                               = 磨砂质感(用户要求:隔层纱的磨砂,底下朦胧不清);面板次透、
+                               灰块再一档,每层之间透出模糊背景形成层次。 */
+                            --acu-bg-0: rgba(244, 244, 247, 0.62) !important;
                             --acu-bg-1: rgba(250, 250, 252, 0.7) !important;
                             --acu-bg-2: rgba(226, 226, 232, 0.55) !important;
                             --acu-sidebar-bg: rgba(246, 246, 248, 0.6) !important;
@@ -412,7 +413,14 @@
                             -webkit-backdrop-filter: blur(16px) saturate(180%) !important;
                             backdrop-filter: blur(16px) saturate(180%) !important;
                         }
-                        #acu-app-v2 .acu-v2-app__shell,
+                        /* 全屏 shell:轻 blur 12px 做磨砂底(用户要求磨砂质感;12px 远轻于
+                           历史卡顿源的 20-24px,实机已确认可接受)。其余三个全屏遮罩层
+                           (dialog-layer/drawer-layer/mobile-nav-layer 是覆盖视口的弹窗遮罩,
+                           透明黑底无需 blur)保持 none。 */
+                        #acu-app-v2 .acu-v2-app__shell {
+                            -webkit-backdrop-filter: blur(12px) saturate(160%) !important;
+                            backdrop-filter: blur(12px) saturate(160%) !important;
+                        }
                         #acu-app-v2 .acu-dialog-layer,
                         #acu-app-v2 .acu-v2-drawer-layer,
                         #acu-app-v2 .acu-v2-app__mobile-nav-layer {
