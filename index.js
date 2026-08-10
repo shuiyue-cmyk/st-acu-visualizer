@@ -369,11 +369,9 @@
         if (glassOn) {
             const accent = DB_ACCENTS[config.dbAccent] || DB_ACCENTS.blue;
             const injectGlass = () => {
-                // 苹果毛玻璃:最底层(shell/bg0)近实色(0.92,16.10.9 卡顿修复)——全屏
-                // shell 若半透明 0.5,GPU 每帧合成整个视口透出底下聊天 = 持续卡顿;
-                // 0.92 盖住底下文字、合成成本骤降。玻璃层次感由面板实底 + 抽屉/弹窗
-                // 局部 blur 承担。面板层稍实保证可读。
-                const bg0 = 'rgba(244, 244, 247, 0.92)'; // 近实色(16.10.9 卡顿修复):全屏 shell 若半透明 0.5,GPU 每帧合成整个视口透出底下聊天 = 持续卡顿;0.92 合成成本骤降
+                // 苹果毛玻璃:半透明白,最底层(bg0)较透(0.5),让酒馆界面透过毛玻璃
+                // 朦胧可见(用户实机反馈:0.72 白壳把酒馆全盖住);面板层稍实保证可读。
+                const bg0 = 'rgba(244, 244, 247, 0.5)';
                 const bg1 = 'rgba(250, 250, 252, 0.75)';
                 const bg2 = 'rgba(226, 226, 232, 0.5)';
                 const sidebarBg = 'rgba(246, 246, 248, 0.55)';
@@ -411,24 +409,14 @@
                             --acu-radius-sm: 8px !important;
                             --acu-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06) !important;
                         }
-                        /* 毛玻璃只给局部浮层本体(侧边抽屉/弹窗卡片/移动导航面板)。子元素零
-                           backdrop-filter:每加一个就是多一个合成层 + 一次对背景的高斯模糊。
-                           ⚠️ 全屏容器(shell/.acu-dialog-layer/.acu-v2-drawer-layer/.acu-v2-app__mobile-nav-layer
-                           都是 fixed inset:0 覆盖整个视口的遮罩层)绝不能加 backdrop-filter——
-                           整屏每帧 GPU 高斯模糊是性能灾难,实机卡顿(用户「夺舍数据库UI时卡」,
-                           T9/T17/T18 三轮实证;16.10.13 回退曾带回 shell 全屏 blur,已多次修复)。
-                           blur 只给浮层本体:侧边抽屉 .acu-v2-drawer、弹窗卡片 .acu-dialog。 */
-                        #acu-app-v2 .acu-v2-drawer,
-                        #acu-app-v2 .acu-dialog {
-                            -webkit-backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
-                            backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
-                        }
+                        /* 毛玻璃只给外层容器(shell/各弹层)。子元素零 backdrop-filter:
+                           每加一个就是多一个合成层 + 一次对背景的高斯模糊。 */
                         #acu-app-v2 .acu-v2-app__shell,
                         #acu-app-v2 .acu-dialog-layer,
                         #acu-app-v2 .acu-v2-drawer-layer,
                         #acu-app-v2 .acu-v2-app__mobile-nav-layer {
-                            -webkit-backdrop-filter: none !important;
-                            backdrop-filter: none !important;
+                            -webkit-backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
+                            backdrop-filter: blur(${blurPx}) saturate(${sat}) !important;
                         }
                         /* 亮顶边(光打在材料上):所有玻璃容器——shell/侧栏/弹窗/抽屉都补 */
                         #acu-app-v2 .acu-v2-app__shell,
@@ -622,10 +610,9 @@
                         max-width: 100% !important;
                     }
                 }
-                /* 苹果设计主题：毛玻璃材料增强 + 降级兜底。
-                   注:.acu-data-display 展开时近全屏(95vh),不进 blur 选择器——
-                   全屏高斯模糊是卡顿源(性能审查第3轮 explore-38 定位,与默认主题一致) */
+                /* 苹果设计主题：毛玻璃材料增强 + 降级兜底 */
                 .acu-theme-apple .acu-nav-container,
+                .acu-theme-apple .acu-data-display,
                 .acu-theme-apple.acu-embedded-options-container,
                 .acu-theme-apple.acu-embedded-options-container .acu-option-panel,
                 .acu-theme-apple.acu-embedded-options-container .acu-opt-ctrl-bar,
@@ -687,6 +674,7 @@
                    从 1.5ms 涨到 10.3ms。卡片在被模糊过的容器里，靠自身半透明白底就有
                    玻璃质感，不需要自己再模糊一遍背景。 */
                 .acu-theme-blushglass .acu-nav-container,
+                .acu-theme-blushglass .acu-data-display,
                 .acu-theme-blushglass.acu-embedded-options-container,
                 .acu-theme-blushglass.acu-embedded-options-container .acu-option-panel,
                 .acu-theme-blushglass.acu-embedded-options-container .acu-opt-ctrl-bar,
@@ -763,10 +751,8 @@
                 .acu-edit-overlay.acu-theme-blushglass,
                 .acu-quick-view-overlay.acu-theme-blushglass {
                     background: rgba(120, 60, 85, 0.26) !important;
-                    /* 遮罩层(fixed 全屏)不 blur——全屏每帧高斯模糊是卡顿源(T9/T18 铁律),
-                       毛玻璃由弹窗卡片本体 blur(24px)承担(见上方卡片规则) */
-                    -webkit-backdrop-filter: none !important;
-                    backdrop-filter: none !important;
+                    -webkit-backdrop-filter: blur(6px) !important;
+                    backdrop-filter: blur(6px) !important;
                 }
                 /* 不支持 backdrop-filter 时提实背景（偏白，粉只留边），保证文字可读 */
                 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -958,9 +944,7 @@
                 .acu-opt-btn:active { transform: translateY(0); opacity: 0.8; }
                 .acu-opt-header { flex: 0 0 100%; width: 100%; text-align: center; font-size: 12px; font-weight: bold; color: var(--acu-title-color); padding: 2px 0; border-bottom: 1px dashed var(--acu-border); margin-bottom: 4px; opacity: 0.9; }
 
-                .acu-data-display { position: absolute; bottom: calc(100% +  8px); left: 0; right: 0; max-height: 95vh; height: auto; background: var(--acu-bg-panel); border: 1px solid var(--acu-border); border-radius: 12px; box-shadow: 0 12px 40px var(--acu-shadow); display: none; flex-direction: column; z-index: 20002; animation: popUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); overflow: hidden; }
-                /* 注:data-display 展开时近全屏(95vh),不加 backdrop-filter——全屏高斯模糊是
-                   性能负担(性能审查第2轮),玻璃感由内部卡片/主题块承担 */
+                .acu-data-display { position: absolute; bottom: calc(100% +  8px); left: 0; right: 0; max-height: 95vh; height: auto; background: var(--acu-bg-panel); border: 1px solid var(--acu-border); border-radius: 12px; box-shadow: 0 12px 40px var(--acu-shadow); display: none; flex-direction: column; z-index: 20002; animation: popUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); backdrop-filter: blur(8px); overflow: hidden; }
                 .acu-data-display.visible { display: flex; }
                 .acu-no-anim { animation: none !important; transform: none !important; }
                 @keyframes popUp { from { opacity: 0; transform: translateY(15px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
@@ -1040,7 +1024,7 @@
                 .acu-tab-pane.active { display: block; }
                 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 
-                .acu-quick-view-overlay { position: fixed !important; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100vh; background: var(--acu-overlay-bg) !important; z-index: 2147483648 !important; display: flex !important; justify-content: center !important; align-items: center !important; }
+                .acu-quick-view-overlay { position: fixed !important; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100vh; background: var(--acu-overlay-bg) !important; z-index: 2147483648 !important; display: flex !important; justify-content: center !important; align-items: center !important; backdrop-filter: blur(4px); }
                 .acu-quick-view-card { background: var(--acu-card-bg); border-radius: 12px; border: 1px solid var(--acu-border); box-shadow: 0 15px 50px var(--acu-shadow); width: 90%; max-width: 450px; max-height: 80vh; display: flex; flex-direction: column; overflow: hidden; animation: popUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1); color: var(--acu-text-main); }
                 .acu-quick-view-header { padding: 5px; background: var(--acu-table-head); border-bottom: 1px solid var(--acu-border); font-weight: bold; display: flex; justify-content: space-between; align-items: center; font-size: 1.1em; color: var(--acu-highlight); }
                 .acu-quick-view-body { padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; scrollbar-width: thin; }
@@ -1129,7 +1113,7 @@
                 .acu-cell-menu-item:hover { background-color: var(--acu-table-hover); }
                 .acu-cell-menu-item#act-delete { color: #e74c3c; }
 
-                .acu-edit-overlay { position: fixed !important; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100vh; background: var(--acu-overlay-bg) !important; z-index: 2147483646 !important; display: flex !important; justify-content: center !important; align-items: center !important; }
+                .acu-edit-overlay { position: fixed !important; top: 0; left: 0; right: 0; bottom: 0; width: 100vw; height: 100vh; background: var(--acu-overlay-bg) !important; z-index: 2147483646 !important; display: flex !important; justify-content: center !important; align-items: center !important; backdrop-filter: blur(2px); }
                 .acu-edit-dialog { background-color: var(--acu-bg-panel) !important; width: 90%; max-width: 900px; max-height: 85vh; border-radius: 12px; display: flex; flex-direction: column; box-shadow: 0 15px 50px var(--acu-shadow); color: var(--acu-text-main) !important; border: 1px solid var(--acu-border); margin: auto !important; overflow: hidden; padding: 0; }
                 .acu-edit-title { flex: 0 0 auto; margin: 0; padding: 20px 24px; font-size: 16px; font-weight: bold; color: var(--acu-text-main); border-bottom: 1px solid var(--acu-border); }
                 .acu-settings-content { flex: 1; overflow-y: auto; padding: 20px 24px; display: block; }
@@ -1177,11 +1161,15 @@
                 .acu-cell-menu-item#act-insert { color: #2980b9; }
                 .acu-wrapper button:focus, .acu-edit-dialog button:focus, .acu-cell-menu button:focus { outline: none !important; }
                 
-                /* 历史遗留(V16.4 起)的无条件 blur 已移除(性能审查第2轮 explore-35 定位):
-                   .acu-nav-container blur(16px) 与 936 的 blur(5px) 重复且更重;
-                   .acu-data-display blur(20px) saturate(180%) 展开时是近全屏(95vh)固定层,
-                   每帧全屏高斯模糊 = 卡顿根源(用户实测「打开数据库UI就卡」)。
-                   毛玻璃只给局部容器,近全屏层不 blur——玻璃感由内部卡片/主题块承担。 */
+                
+                .acu-nav-container {
+                    backdrop-filter: blur(16px) saturate(150%);
+                    -webkit-backdrop-filter: blur(16px) saturate(150%);
+                }
+                .acu-data-display {
+                    backdrop-filter: blur(20px) saturate(180%);
+                    -webkit-backdrop-filter: blur(20px) saturate(180%);
+                }
                 
                 .acu-theme-aurora .acu-data-card::before, .acu-theme-sunset .acu-data-card::before, .acu-theme-starship .acu-data-card::before, .acu-theme-sky .acu-data-card::before {
                     content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
@@ -1252,17 +1240,12 @@
                 .acu-edit-dialog.acu-theme-apple .acu-section-header {
                     border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
                 }
-                /* 苹果主题 overlay（JS 已给 overlay 加 acu-theme-apple 类）：轻压暗。
-                   遮罩层(fixed 全屏)不 blur——全屏每帧高斯模糊是卡顿源(T9/T18 铁律),
-                   毛玻璃感由弹窗卡片本体 blur 承担(见下方卡片规则)。 */
+                /* 苹果主题 overlay（JS 已给 overlay 加 acu-theme-apple 类）：更轻压暗 + 更强模糊，
+                   让弹窗毛玻璃背景透出聊天内容而非黑幕。 */
                 .acu-edit-overlay.acu-theme-apple {
                     background: rgba(0, 0, 0, 0.28) !important;
-                    -webkit-backdrop-filter: none !important;
-                    backdrop-filter: none !important;
-                }
-                .acu-edit-dialog.acu-theme-apple {
-                    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-                    backdrop-filter: blur(20px) saturate(180%) !important;
+                    -webkit-backdrop-filter: blur(6px) !important;
+                    backdrop-filter: blur(6px) !important;
                 }
                 /* 苹果主题详情弹窗（点单元格/卡片弹出的快速查看）：
                    默认只有 background: var(--acu-card-bg)，苹果主题下那是 rgba(255,255,255,0.6)——
@@ -1309,16 +1292,11 @@
                 .acu-quick-view-card.acu-theme-apple .acu-grid-label {
                     color: #6e6e73 !important;
                 }
-                /* 苹果主题详情弹窗 overlay：轻压暗。遮罩层不 blur(全屏 fixed,见上注释),
-                   毛玻璃由卡片本体 blur 承担 */
+                /* 苹果主题详情弹窗 overlay：轻压暗 + 模糊，和设置弹窗一致 */
                 .acu-quick-view-overlay.acu-theme-apple {
                     background: rgba(0, 0, 0, 0.28) !important;
-                    -webkit-backdrop-filter: none !important;
-                    backdrop-filter: none !important;
-                }
-                .acu-quick-view-card.acu-theme-apple {
-                    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-                    backdrop-filter: blur(20px) saturate(180%) !important;
+                    -webkit-backdrop-filter: blur(6px) !important;
+                    backdrop-filter: blur(6px) !important;
                 }
                 /* 不支持 backdrop-filter 时设置弹窗/详情弹窗都提实背景 */
                 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
@@ -1633,6 +1611,7 @@
             .acu-edit-overlay { 
                 position: fixed !important; top: 0; left: 0; right: 0; bottom: 0; 
                 background: rgba(0, 0, 0, 0.5) !important; 
+                backdrop-filter: blur(3px); 
                 z-index: 2147483647 !important; 
                 display: flex !important; 
                 align-items: center; justify-content: center;
@@ -2640,11 +2619,6 @@ ${allTableNames.map(tName => {
             let optBtnCount = 0; if (optionTables.length > 0 && !hideOptionsUntilUpdate) {
                 let buttonsHtml = '';
                 let hasBtns = false;
-                // 选项按钮封顶(性能审查第2轮 explore-35):大选项表每行每列都生成按钮,
-                // 无界增长会灌爆折叠容器(仿仪表盘胶囊 CAPSULE_RENDER_CAP=60 的做法),
-                // 超出部分用提示条引导去表格页。
-                const OPT_BTN_CAP = 60;
-                let optShown = 0, optSkipped = 0;
                 optionTables.forEach(table => {
                     if(table.rows && Array.isArray(table.headers)) {
                          // 关键修复：按 headers 的列数遍历，而不是按 row 的实际长度。
@@ -2657,17 +2631,13 @@ ${allTableNames.map(tName => {
                               for (let idx = 1; idx < colCount; idx++) {
                                    const cell = (row && row[idx] != null) ? String(row[idx]) : '';
                                    if (cell) {
-                                       if (optShown >= OPT_BTN_CAP) { optSkipped++; continue; }
                                        buttonsHtml += `<button class="acu-opt-btn" data-val="${encodeURIComponent(cell)}">${escapeHtml(cell)}</button>`;
-                                       hasBtns = true; optBtnCount++; optShown++;
+                                       hasBtns = true; optBtnCount++;
                                    }
                               }
                          });
                     }
                 });
-                if (optSkipped > 0) {
-                    buttonsHtml += `<div style="padding:8px 10px; color:var(--acu-text-sub); font-size:11px; text-align:center;">仅显示前 ${OPT_BTN_CAP} 个选项，另有 ${optSkipped} 个请到表格页查看</div>`;
-                }
                 if (hasBtns) {
                     optionBtnContent = buttonsHtml;
                 }
@@ -4826,23 +4796,13 @@ const checkRowChanged = (realIdx, row) => {
                   renderInterface(true);
                  const api = getCore().getDB();
                  if (api.registerTableUpdateCallback) {
-                     // 命名 handler + 先 unregister 再 register(DB 8.9 提供 unregister):
-                     // 防热重载/重复注入时旧闭包 handleUpdate 累积(性能审查第2轮 explore-36)。
-                     // 注:热重载会生成新函数引用,unregister 匹配不到旧闭包的引用,
-                     // 但 DB 侧 register 有去重(includes),同实例内不会重复注册;
-                     // fillStart 回调 DB 未提供 unregister,依赖其去重。
-                     if (api.unregisterTableUpdateCallback) api.unregisterTableUpdateCallback(UpdateController.handleUpdate);
                      api.registerTableUpdateCallback(UpdateController.handleUpdate);
                      if (api.registerTableFillStartCallback) {
                          // 填表开始：存一份快照 + 启动稳定轮询（填表跑完自动兜底刷新）
-                         if (!window.__acuFillStartBound) {
-                             window.__acuFillStartBound = true;
-                             const fillStartHandler = () => {
-                                 try { const c = api.exportTableAsJson(); if (c) saveSnapshot(c); } catch (_) {}
-                                 startFillPoll();
-                             };
-                             api.registerTableFillStartCallback(fillStartHandler);
-                         }
+                         api.registerTableFillStartCallback(() => {
+                             try { const c = api.exportTableAsJson(); if (c) saveSnapshot(c); } catch (_) {}
+                             startFillPoll();
+                         });
                      }
                  }
                  isInitialized = true;
@@ -4860,11 +4820,6 @@ const checkRowChanged = (realIdx, row) => {
                      try { localStorage.removeItem(STORAGE_KEY_LAST_SNAPSHOT); } catch (_) {}
                      currentDiffMap.clear();
                      currentPage = 1;
-                     // 性能审查第2轮 explore-36:切聊天还必须清空跨聊天的行级状态,
-                     // 否则旧聊天行键(rowKey 同构)撞上新聊天会误删/误选
-                     selectedRows.clear();
-                     pendingDeletes.clear();
-                     isMultiSelectMode = false;
                      if (!isEditingOrder) renderInterface(true);
                  };
                  try {
