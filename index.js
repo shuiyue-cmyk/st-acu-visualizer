@@ -4796,13 +4796,23 @@ const checkRowChanged = (realIdx, row) => {
                   renderInterface(true);
                  const api = getCore().getDB();
                  if (api.registerTableUpdateCallback) {
+                     // 命名 handler + 先 unregister 再 register(DB 8.9 提供 unregister):
+                     // 防热重载/重复注入时旧闭包 handleUpdate 累积(性能审查第2轮 explore-36)。
+                     // 注:热重载会生成新函数引用,unregister 匹配不到旧闭包的引用,
+                     // 但 DB 侧 register 有去重(includes),同实例内不会重复注册;
+                     // fillStart 回调 DB 未提供 unregister,依赖其去重。
+                     if (api.unregisterTableUpdateCallback) api.unregisterTableUpdateCallback(UpdateController.handleUpdate);
                      api.registerTableUpdateCallback(UpdateController.handleUpdate);
                      if (api.registerTableFillStartCallback) {
                          // 填表开始：存一份快照 + 启动稳定轮询（填表跑完自动兜底刷新）
-                         api.registerTableFillStartCallback(() => {
-                             try { const c = api.exportTableAsJson(); if (c) saveSnapshot(c); } catch (_) {}
-                             startFillPoll();
-                         });
+                         if (!window.__acuFillStartBound) {
+                             window.__acuFillStartBound = true;
+                             const fillStartHandler = () => {
+                                 try { const c = api.exportTableAsJson(); if (c) saveSnapshot(c); } catch (_) {}
+                                 startFillPoll();
+                             };
+                             api.registerTableFillStartCallback(fillStartHandler);
+                         }
                      }
                  }
                  isInitialized = true;
@@ -4820,6 +4830,11 @@ const checkRowChanged = (realIdx, row) => {
                      try { localStorage.removeItem(STORAGE_KEY_LAST_SNAPSHOT); } catch (_) {}
                      currentDiffMap.clear();
                      currentPage = 1;
+                     // 性能审查第2轮 explore-36:切聊天还必须清空跨聊天的行级状态,
+                     // 否则旧聊天行键(rowKey 同构)撞上新聊天会误删/误选
+                     selectedRows.clear();
+                     pendingDeletes.clear();
+                     isMultiSelectMode = false;
                      if (!isEditingOrder) renderInterface(true);
                  };
                  try {
