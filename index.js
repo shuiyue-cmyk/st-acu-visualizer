@@ -382,10 +382,11 @@
                     <style id="acu-v2-apple">
                         /* 苹果毛玻璃材料 token(全 !important 压 DB 侧 applyTheme 重写) */
                         #acu-app-v2 {
-                            /* 三档透明度梯度拉开纵深(实机反馈:原来 bg0/bg1 明度差仅 0.9%,
-                               近白面板把毛玻璃填平)。shell 最透、面板次透、灰块再一档,
-                               每层之间能透出模糊背景形成层次。 */
-                            --acu-bg-0: rgba(244, 244, 247, 0.72) !important;
+                            /* 三档透明度梯度拉开纵深。shell 底近实色 0.92(16.10.9 卡顿修复,
+                               16.10.20 回滚 16.10.1 时丢回 0.72 半透明——全屏 shell 半透明
+                               透出底下滚动聊天,GPU 每帧合成整个视口=持续卡顿,用户实机
+                               确认「卡顿解决了」在 0.92);面板次透、灰块再一档。 */
+                            --acu-bg-0: rgba(244, 244, 247, 0.92) !important;
                             --acu-bg-1: rgba(250, 250, 252, 0.85) !important;
                             --acu-bg-2: rgba(226, 226, 232, 0.62) !important;
                             --acu-sidebar-bg: rgba(246, 246, 248, 0.78) !important;
