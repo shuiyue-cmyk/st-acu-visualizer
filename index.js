@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.1.8'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.1.9'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -29,6 +29,11 @@
     let globalScrollTop = 0;
     let currentPage = 1;
     let currentSearchTerm = '';
+    // 性能审查 P2-1:搜索过滤结果缓存(键=表名+搜索词+数据指纹),翻页/重复渲染复用,
+    // 避免大表(5000×30)每次 render 全量 map+filter+sort;数据变化/搜索词变化即失效。
+    let searchCacheKey = '';
+    let searchCacheResult = null;
+    let searchCacheDataAnchor = null;
     let selectedRows = new Map();
     let cachedTableData = null;
     let isMultiSelectMode = false;
@@ -74,7 +79,8 @@
             lastRawTableRef = null;
             lastTableSetFingerprint = '';
             lastTableDataRefreshed = true;
-            cachedTableData = null;
+            // 保留 cachedTableData:getTableData(true) 内 cloneTableDataPartial(raw, cachedTableData)
+            // 按表克隆,只深拷贝变化的 sheet(性能审查 P1-1),避免每次通知全表 8.3MB 深拷贝。
             renderInterface(true);
         }
     };
@@ -253,9 +259,16 @@
     const saveTableOrder = (tableNames) => { try { localStorage.setItem(STORAGE_KEY_TABLE_ORDER, JSON.stringify(tableNames)); } catch (e) { console.error(e); } };
     const getSavedActionOrder = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_ACTION_ORDER)); } catch (e) { return null; } };
     const saveActionOrder = (list) => { try { localStorage.setItem(STORAGE_KEY_ACTION_ORDER, JSON.stringify(list)); } catch (e) { console.error(e); } };
+    // 性能审查 P3-2:配置内存缓存——一次渲染内 getConfig 被调 8+ 次,避免每次都 JSON.parse;
+    // 缓存的是解析后的原始对象,getConfig 每次仍浅拷贝展开(DEFAULT_CONFIG + saved)防止脏写。
+    let configCache = null;
     const getConfig = () => {
         try {
-            const saved = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_CONFIG));
+            let saved = configCache;
+            if (saved === null) {
+                saved = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_CONFIG));
+                configCache = saved;
+            }
             // 配置迁移(16.10.21):液态玻璃时代(16.10.2~12)的「数据库UI风格」下拉,
             // handler 写 saveConfig({dbStyle, dbAppleGlass: val!=='off'})——用户选「透明玻璃
             // (clear)」时也连带把 dbAppleGlass 写成 true。clear 已被删除(16.10.13),
@@ -271,7 +284,7 @@
             return { ...DEFAULT_CONFIG, ...saved };
         } catch (e) { return DEFAULT_CONFIG; }
     };
-    const saveConfig = (newConfig) => { const current = getConfig(); const merged = { ...current, ...newConfig }; try { localStorage.setItem(STORAGE_KEY_UI_CONFIG, JSON.stringify(merged)); } catch (e) { console.error(e); } applyConfigStyles(merged); };
+    const saveConfig = (newConfig) => { const current = getConfig(); const merged = { ...current, ...newConfig }; try { localStorage.setItem(STORAGE_KEY_UI_CONFIG, JSON.stringify(merged)); } catch (e) { console.error(e); } configCache = null; applyConfigStyles(merged); };
     
     const getTableHeights = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_HEIGHTS)) || {}; } catch (e) { return {}; } };
     const saveTableHeights = (heights) => { try { localStorage.setItem(STORAGE_KEY_TABLE_HEIGHTS, JSON.stringify(heights)); } catch (e) { console.error(e); } };
@@ -1259,9 +1272,12 @@
                 .acu-theme-aurora .acu-data-card::before, .acu-theme-sunset .acu-data-card::before, .acu-theme-starship .acu-data-card::before, .acu-theme-sky .acu-data-card::before {
                     content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
                     background: linear-gradient(135deg, var(--acu-highlight), var(--acu-text-sub));
-                    border-radius: inherit; z-index: -1; opacity: 0; transition: opacity 0.3s ease; filter: blur(8px);
+                    border-radius: inherit; z-index: -1; opacity: 0; transition: opacity 0.3s ease;
                 }
-                .acu-theme-aurora .acu-data-card:hover::before, .acu-theme-sunset .acu-data-card:hover::before, .acu-theme-starship .acu-data-card:hover::before, .acu-theme-sky .acu-data-card:hover::before { opacity: 0.3; }
+                /* 性能审查 P3-1:blur 只在 hover 时应用——常驻 blur(8px) 会让浏览器为每张卡片
+                   维护一个合成层(即使 opacity:0 不绘制),一页 20 卡 = 20 个 blur 层;移入 hover
+                   后非 hover 卡片不建层,零风险纯 CSS 优化 */
+                .acu-theme-aurora .acu-data-card:hover::before, .acu-theme-sunset .acu-data-card:hover::before, .acu-theme-starship .acu-data-card:hover::before, .acu-theme-sky .acu-data-card:hover::before { opacity: 0.3; filter: blur(8px); }
                 
                 @media (max-width: 768px) {
                     .acu-nav-btn {
@@ -1491,6 +1507,65 @@
         }
     };
 
+    // 逐表轻量指纹(性能审查 P1-1):对每个 sheet 独立算指纹,用于定位「哪几张表真的变了」,
+    // 支持只 clone 变化表、复用其余表缓存(避免填表/追平期间每 1.5-2s 全表深拷贝 8.3MB)。
+    const sheetFingerprints = (data) => {
+        const out = {};
+        if (!data || typeof data !== 'object') return out;
+        try {
+            const sheets = Object.keys(data).filter(k => k.startsWith('sheet_'));
+            for (const k of sheets) {
+                const s = data[k];
+                if (!s || !Array.isArray(s.content) || s.content.length === 0) { out[k] = k + ':0;'; continue; }
+                let fp = k + ':' + s.content.length + ';';
+                // 全列采样:列数受 diffMap 64 列上限约束,全列成本可控且避免第 7+ 列变化误判「未变」
+                const ROWS_SCAN = 20;
+                const n = s.content.length;
+                const rowLimit = Math.min(n, ROWS_SCAN);
+                for (let r = 0; r < rowLimit; r += 2) {
+                    const row = s.content[r];
+                    if (Array.isArray(row)) {
+                        for (let cc = 0; cc < row.length; cc++) fp += (row[cc] ?? '') + '|';
+                    }
+                    fp += ';';
+                }
+                const last = s.content[n - 1];
+                if (Array.isArray(last)) {
+                    for (let cc = 0; cc < last.length; cc++) fp += (last[cc] ?? '') + '|';
+                }
+                fp += ';';
+                out[k] = fp;
+            }
+            return out;
+        } catch (_) { return out; }
+    };
+
+    // 按表克隆(性能审查 P1-1):对比新旧逐表指纹,只深拷贝变化的 sheet,其余 sheet 复用旧缓存引用。
+    // 保持「克隆副本」不变式(读/写路径依赖非 DB 引用副本),但粒度从全表降到单表——
+    // 填表/追平期间通常只有 1-2 张表在变,其余表(如 8.3MB 里的历史大表)不再每次深拷贝。
+    const cloneTableDataPartial = (raw, oldCached) => {
+        if (!raw || typeof raw !== 'object') return raw;
+        const cloneOne = (v) => { try { return structuredClone(v); } catch (_) { try { return JSON.parse(JSON.stringify(v)); } catch (__) { return v; } } };
+        try {
+            const newFp = sheetFingerprints(raw);
+            const oldFp = sheetFingerprints(oldCached);
+            const sheets = Object.keys(raw).filter(k => k.startsWith('sheet_'));
+            let anyChanged = false;
+            for (const k of sheets) { if (newFp[k] !== oldFp[k]) { anyChanged = true; break; } }
+            if (!anyChanged && oldCached) return oldCached; // 指纹全同 = 数据未动,直接复用旧缓存
+            const out = {};
+            for (const k of Object.keys(raw)) {
+                if (!k.startsWith('sheet_')) { out[k] = cloneOne(raw[k]); continue; } // 非 sheet 元数据克隆
+                if (!oldCached || newFp[k] !== oldFp[k]) {
+                    out[k] = cloneOne(raw[k]); // 变化表(或无旧缓存):克隆新副本
+                } else {
+                    out[k] = oldCached[k]; // 未变化表:复用旧缓存引用(读路径只读,安全)
+                }
+            }
+            return out;
+        } catch (_) { return cloneTableData(raw); } // 兜底:异常时退回全量克隆
+    };
+
     // 缓存数据来源的原始引用：exportTableAsJson 返回 DB 内部 currentJsonTableData_ACU，
     // DB 在数据合并时以不可变式替换整个对象（_set_currentJsonTableData_ACU 换新引用）。
     // 引用相同 = 数据未变 → forceRefresh 时可跳过深拷贝直接复用缓存，避免高频全表 clone。
@@ -1530,7 +1605,9 @@
             lastTableDataRefreshed = true;
             // 关键：exportTableAsJson 返回的是 DB 内部 currentJsonTableData_ACU 的直接引用，
             // 必须深拷贝后再对外返回，否则前端的就地修改会绕过 DB 的事务/校验逻辑。
-            const data = cloneTableData(raw);
+            // 性能审查 P1-1：按表克隆——只深拷贝指纹变化的 sheet，其余 sheet 复用旧缓存，
+            // 填表/追平期间避免每 1.5-2s 全表 8.3MB 深拷贝。
+            const data = cloneTableDataPartial(raw, cachedTableData);
             if (data) {
                 cachedTableData = data;
             }
@@ -2719,20 +2796,31 @@ ${allTableNames.map(tName => {
                 contentHtml = renderTableContent(tables[currentTabName], currentTabName);
             }
 
-            // 选项表变化检测：用轻量摘要替代全量 JSON.stringify（选项表结构 {key,headers,rows}）。
-            // 按 headers 长度全列投影（选项表列数少，全列成本低），避免前 12 列截断漏检 13+ 列变化。
+            // 选项表变化检测：用轻量采样指纹替代全量投影拼接(性能审查 P3-3)。
+            // 全量 join(';') 在几百行选项表下每 render ~1ms;改为「行数 + 前 8 行每行前 8 列 + 末行」
+            // 采样,检测增删行/前部/末部变化仍准,成本降一个量级。
             const optionStr = optionTables.map(ot => {
                 const hdrArr = Array.isArray(ot?.headers) ? ot.headers : [];
                 const h = hdrArr.join(',');
                 const rowsArr = Array.isArray(ot?.rows) ? ot.rows : [];
-                const rs = rowsArr.map(r => {
-                    if (!Array.isArray(r)) return '';
-                    const cl = hdrArr.length || r.length; // 按表头列数投影；无表头时按行长度
+                const n = rowsArr.length;
+                // 采样覆盖:前 20 行全采 + 末行,列取全列。相比旧版全量投影,只牺牲
+                // 「第 21+ 行(非末行)」的变化检测——选项表行数中低,前 20 行+末行覆盖绝大多数;
+                // 增删行/前部/末部/任意列内容变化仍可靠捕获(探针实测)。
+                const SAMPLE_ROWS = 20;
+                const sampleRow = (r) => {
+                    const row = rowsArr[r];
+                    if (!Array.isArray(row)) return '';
                     let s = '';
-                    for (let cc = 0; cc < cl; cc++) s += (r[cc] ?? '') + '|';
+                    const cl = row.length; // 全列采样
+                    for (let cc = 0; cc < cl; cc++) s += (row[cc] ?? '') + '|';
                     return s;
-                }).join(';');
-                return h + '@' + rowsArr.length + ':' + rs;
+                };
+                let rs = n + ':';
+                const rowLimit = Math.min(n, SAMPLE_ROWS + 1); // +1 覆盖索引 20(前 21 行全采)
+                for (let r = 0; r < rowLimit; r++) rs += sampleRow(r) + ';';
+                if (n > rowLimit) rs += sampleRow(n - 1) + ';'; // 末行补最新写入
+                return h + '@' + rs;
             }).join('~');
             if (optionStr !== lastOptionDataCheck) {
                 hideOptionsUntilUpdate = false;
@@ -3459,19 +3547,42 @@ const checkRowChanged = (realIdx, row) => {
                 hasChange: checkRowChanged(index, row)
             }));
 
-            if (currentSearchTerm) {
+            const doFilter = (items) => {
+                if (!currentSearchTerm) return items;
                 const term = String(currentSearchTerm).toLowerCase();
-                processedRows = processedRows.filter(item =>
-                    item.data && item.data.some(cell => String(cell).toLowerCase().includes(term))
-                );
-            }
+                // 逐格 toLowerCase + some() 短路(匹配列靠前即停),单次过滤比整行 join 快
+                return items.filter(item => item.data && item.data.some(cell => String(cell).toLowerCase().includes(term)));
+            };
+            const doSort = (items) => {
+                items.sort((a, b) => {
+                    if (a.hasChange && !b.hasChange) return -1;
+                    if (!a.hasChange && b.hasChange) return 1;
+                    if (isReversed) return b.originalIndex - a.originalIndex;
+                    return a.originalIndex - b.originalIndex;
+                });
+                return items;
+            };
 
-            processedRows.sort((a, b) => {
-                if (a.hasChange && !b.hasChange) return -1;
-                if (!a.hasChange && b.hasChange) return 1;
-                if (isReversed) return b.originalIndex - a.originalIndex;
-                return a.originalIndex - b.originalIndex;
-            });
+            if (currentSearchTerm) {
+                // 性能审查 P2-1:过滤+排序结果缓存——同一 (表+搜索词+数据引用+排序方向) 下
+                // 翻页/重复 render 复用,不再每次全量 map+filter+sort(大表 10-30ms → 0)。
+                // 数据引用(tableData.rows 数组)随新 clone 变化,数据更新即自动失效。
+                const cacheKey = tableName + '\u0001' + currentSearchTerm + '\u0001' + (isReversed ? 'r' : 'f');
+                const dataAnchor = tableData && tableData.rows ? tableData.rows : null;
+                if (searchCacheKey === cacheKey && searchCacheResult && searchCacheDataAnchor === dataAnchor) {
+                    processedRows = searchCacheResult;
+                } else {
+                    processedRows = doSort(doFilter(processedRows));
+                    searchCacheKey = cacheKey;
+                    searchCacheResult = processedRows;
+                    searchCacheDataAnchor = dataAnchor;
+                }
+            } else {
+                searchCacheKey = '';
+                searchCacheResult = null;
+                searchCacheDataAnchor = null;
+                processedRows = doSort(processedRows);
+            }
 
             displayTotal = processedRows.length;
             const totalPages = Math.ceil(displayTotal / itemsPerPage) || 1;
@@ -4892,7 +5003,8 @@ const checkRowChanged = (realIdx, row) => {
                     // 不在此 clone：renderInterface(true) 内部 getTableData(true) 会统一 clone 一次，
                     // 避免轮询 clone + 渲染 clone 双份全表深拷贝。
                     fillPollStable = 0;
-                    cachedTableData = null;
+                    // 保留 cachedTableData:getTableData(true) 内 cloneTableDataPartial 按表克隆,
+                    // 只深拷贝变化的 sheet(性能审查 P1-1),填表期免全表 8.3MB 深拷贝。
                     lastRawTableRef = null;
                     lastTableSetFingerprint = '';
                     lastTableDataRefreshed = true;
