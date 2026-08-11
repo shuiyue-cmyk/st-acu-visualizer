@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.1.10'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.1.11'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -1623,8 +1623,10 @@
             // 填表/追平期间避免每 1.5-2s 全表 8.3MB 深拷贝。
             const data = cloneTableDataPartial(raw, cachedTableData);
             if (data) {
+                // R-2:仅当产生新对象(数据真正变化/表集合差全量)时递增 dataVersion;
+                // 指纹全同复用旧缓存时 data===cachedTableData,不递增,避免搜索缓存无谓失效。
+                if (data !== cachedTableData) dataVersion++;
                 cachedTableData = data;
-                dataVersion++;
             }
             return data;
         } catch (e) {
@@ -5008,7 +5010,10 @@ const checkRowChanged = (realIdx, row) => {
                 if (Date.now() - fillPollStartedAt > POLL_MAX_MS) { stopFillPoll(); return; }
                 if (inEditingContext()) return; // 用户编辑中不打扰
                 if (!api || typeof api.exportTableAsJson !== 'function') { stopFillPoll(); return; }
-                // 先取轻量指纹判断是否变化；只有变化才 clone 全表（避免每次都深拷贝）
+                // 先取轻量指纹判断是否变化；只有变化才 clone 全表（避免每次都深拷贝）。
+                // 注(R-1):lightFingerprint 采前 6 列而 cloneTableDataPartial 用 sheetFingerprints
+                // 全列——范围不一致是故意的:轮询每 1.5-2s 跑,全列会带来每 tick 全表扫描开销;
+                // 第 7+ 列修改由 DB 的 updateCell 通知 → handleUpdate 全量重拉兜底。
                 let rawRef = null;
                 try { rawRef = api.exportTableAsJson(); } catch (_) { rawRef = null; }
                 const fp = lightFingerprint(rawRef);
