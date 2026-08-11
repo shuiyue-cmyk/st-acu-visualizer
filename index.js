@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.1.9'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.1.10'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -33,7 +33,9 @@
     // 避免大表(5000×30)每次 render 全量 map+filter+sort;数据变化/搜索词变化即失效。
     let searchCacheKey = '';
     let searchCacheResult = null;
-    let searchCacheDataAnchor = null;
+    // 数据版本号:getTableData 每次产生新 clone 时递增,用于搜索缓存失效锚
+    // (rows 引用每次 render 重建,不能作锚;version 只在数据真正变化时变)。
+    let dataVersion = 0;
     let selectedRows = new Map();
     let cachedTableData = null;
     let isMultiSelectMode = false;
@@ -79,8 +81,10 @@
             lastRawTableRef = null;
             lastTableSetFingerprint = '';
             lastTableDataRefreshed = true;
-            // 保留 cachedTableData:getTableData(true) 内 cloneTableDataPartial(raw, cachedTableData)
-            // 按表克隆,只深拷贝变化的 sheet(性能审查 P1-1),避免每次通知全表 8.3MB 深拷贝。
+            // handleUpdate 由用户操作触发(updateCell/updateRow/deleteRow/insertRow 通知),频率低,
+            // 恢复全量重拉(cachedTableData=null):指纹采样会漏检 DB 侧中间行/删表修改(第二轮审查
+            // P1-1-A/B 实证),全量 clone ~6ms 可接受;fillPoll/catchupPoll 仍走 partial 保性能。
+            cachedTableData = null;
             renderInterface(true);
         }
     };
@@ -1550,6 +1554,16 @@
             const newFp = sheetFingerprints(raw);
             const oldFp = sheetFingerprints(oldCached);
             const sheets = Object.keys(raw).filter(k => k.startsWith('sheet_'));
+            // 表集合差检测(第二轮审查 P1-1-B):raw 与 oldCached 的 sheet key 列表不等
+            // (增表/删表) → 指纹循环不覆盖「oldFp 有而 newFp 无」的表,直接全量克隆,
+            // 避免被删表残留在缓存中继续渲染。
+            if (oldCached && typeof oldCached === 'object') {
+                const oldSheets = Object.keys(oldCached).filter(k => k.startsWith('sheet_')).sort();
+                const newSheets = sheets.slice().sort();
+                if (oldSheets.length !== newSheets.length || oldSheets.some((k, i) => k !== newSheets[i])) {
+                    return cloneTableData(raw);
+                }
+            }
             let anyChanged = false;
             for (const k of sheets) { if (newFp[k] !== oldFp[k]) { anyChanged = true; break; } }
             if (!anyChanged && oldCached) return oldCached; // 指纹全同 = 数据未动,直接复用旧缓存
@@ -1610,6 +1624,7 @@
             const data = cloneTableDataPartial(raw, cachedTableData);
             if (data) {
                 cachedTableData = data;
+                dataVersion++;
             }
             return data;
         } catch (e) {
@@ -3564,23 +3579,22 @@ const checkRowChanged = (realIdx, row) => {
             };
 
             if (currentSearchTerm) {
-                // 性能审查 P2-1:过滤+排序结果缓存——同一 (表+搜索词+数据引用+排序方向) 下
+                // 性能审查 P2-1:过滤+排序结果缓存——同一 (表+搜索词+数据版本+排序方向) 下
                 // 翻页/重复 render 复用,不再每次全量 map+filter+sort(大表 10-30ms → 0)。
-                // 数据引用(tableData.rows 数组)随新 clone 变化,数据更新即自动失效。
-                const cacheKey = tableName + '\u0001' + currentSearchTerm + '\u0001' + (isReversed ? 'r' : 'f');
-                const dataAnchor = tableData && tableData.rows ? tableData.rows : null;
-                if (searchCacheKey === cacheKey && searchCacheResult && searchCacheDataAnchor === dataAnchor) {
+                // 失效锚用 dataVersion(只在 getTableData 产生新 clone 时递增),不用 rows 引用——
+                // rows 数组每次 processJsonData content.slice(1) 重建,引用锚会永不命中(第二轮
+                // 审查 explore-61 实证)。
+                const cacheKey = tableName + '\u0001' + currentSearchTerm + '\u0001' + (isReversed ? 'r' : 'f') + '\u0001' + dataVersion;
+                if (searchCacheKey === cacheKey && searchCacheResult) {
                     processedRows = searchCacheResult;
                 } else {
                     processedRows = doSort(doFilter(processedRows));
                     searchCacheKey = cacheKey;
                     searchCacheResult = processedRows;
-                    searchCacheDataAnchor = dataAnchor;
                 }
             } else {
                 searchCacheKey = '';
                 searchCacheResult = null;
-                searchCacheDataAnchor = null;
                 processedRows = doSort(processedRows);
             }
 
