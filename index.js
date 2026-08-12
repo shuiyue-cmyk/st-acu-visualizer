@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.2.0'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.2.1'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -4240,18 +4240,27 @@ const checkRowChanged = (realIdx, row) => {
             if (root0 && root0.style.display === 'none') root0.style.display = '';
 
             // 0) 基础模式兼容：基础模式(isBasicMode)下只有 basic-config 页可见，form-fill 页/
-            //    「全选」/「一键追平」按钮都不可达 → 先试 form-fill；找不到且侧栏出现
-            //    「切换到高手模式」按钮(DB toggleMode 的文案,精确识别基础模式,含从未 toggle
-            //    过默认 basic 的用户)就点击切换,再重试 form-fill。有人反馈基础模式下闪电按钮
-            //    (一键追平)用不了。注:切换会持久化用户模式为 advanced(DB persist),属预期副作用。
-            let okNav = await waitAndClick((rt) => rt.querySelector('button[data-page-id="form-fill"]'), 30, false);
-            if (!okNav) {
-                // 可能是基础模式：找「切换到高手模式」按钮（.acu-v2-sidebar__mode,点击 toggleMode）
-                const modeBtn = await waitAndClick((rt) => findButtonByExactText(rt, ['切换到高手模式'], []), 10, false);
-                if (modeBtn) {
-                    await new Promise(r => setTimeout(r, 400)); // 切模式后页面/侧栏重建留时间
-                    okNav = await waitAndClick((rt) => rt.querySelector('button[data-page-id="form-fill"]'), 30, false);
+            //    「全选」/「一键追平」按钮都不可达。优化：单轮轮询**同时**找 form-fill 与
+            //    「切换到高手模式」按钮——基础模式下 form-fill 永不出现,若只先试 form-fill
+            //    会白等满 30 次(3s)才去识别模式;合并轮询任一出现即处理,基础模式立即切换。
+            //    注:切换会持久化用户模式为 advanced(DB persist),属预期副作用。
+            let okNav = null;
+            let modeBtnEl = null;
+            {
+                let i = 0;
+                const rootEl = () => doc.getElementById('acu-app-v2') || doc;
+                while (i < 30 && !okNav && !modeBtnEl) {
+                    const rt = rootEl();
+                    okNav = rt.querySelector('button[data-page-id="form-fill"]');
+                    if (okNav) { okNav.click(); break; } // 高手模式:命中即点导航切到填表工作台页
+                    modeBtnEl = findButtonByExactText(rt, ['切换到高手模式'], []);
+                    if (!okNav && !modeBtnEl) { await new Promise(r => setTimeout(r, 100)); i++; }
                 }
+            }
+            if (modeBtnEl) {
+                // 基础模式：点「切换到高手模式」（toggleMode），再等 form-fill 出现
+                modeBtnEl.click();
+                okNav = await waitAndClick((rt) => rt.querySelector('button[data-page-id="form-fill"]'), 30, false);
             }
 
             // 1) 切到填表工作台页（侧边栏 button[data-page-id="form-fill"] 触发 setActivePage）
