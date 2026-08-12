@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.2.1'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.2.2'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -4322,6 +4322,14 @@ const checkRowChanged = (realIdx, row) => {
                         const fp = lightFingerprint(apiDB.exportTableAsJson());
                         if (catchupLastFp !== null && fp !== catchupLastFp) {
                             catchupStable = 0; // 数据还在变：追平进行中
+                            // 即时刷新：追平/填表后前端不即时刷新是用户反馈的痛点——DB 追平不调
+                            // _notifyTableUpdate(契约),这里数据一变就 renderInterface(true) 让用户实时看到
+                            // 追平写入的楼层;性能由 P1-1 按表克隆兜底(只克隆变化的 sheet,非全表)。
+                            // 与 fillPoll 的「变化即刷新」语义对齐,追平结束无需再等稳定窗口才刷新。
+                            lastRawTableRef = null;
+                            lastTableSetFingerprint = '';
+                            lastTableDataRefreshed = true;
+                            try { renderInterface(true); } catch (_) {}
                         } else {
                             catchupStable++;
                             if (catchupStable >= CATCHUP_STABLE_N) { finishCatchup(true); return; }
