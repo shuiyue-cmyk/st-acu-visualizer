@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.2.4'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.2.5'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -114,8 +114,7 @@
         dbTransparentMap: {},
         dbAppleGlass: false,
         dbAccent: 'blue',
-        debugMode: false,
-        appleTheme: false
+        debugMode: false
     };
 
     const THEMES = [
@@ -465,64 +464,6 @@
         return diffSet;
     };
 
-    // ── 酒馆界面(SillyTavern/TauriTavern)苹果主题夺舍 ──
-    // ST 前端主题是 SmartTheme CSS 变量系统(style.css:71-89 定义),顶栏/输入框/聊天区
-    // 的毛玻璃材质全部由变量驱动(background=BlurTintColor + backdrop-filter=BlurStrength)。
-    // 夺舍 = 覆盖变量把玻璃换成苹果半透明白 + 深色文字 + 亮顶边,材质机制天然复用。
-    // 性能:不提高 --SmartThemeBlurStrength(全屏 #chat 的 blur 是 ST 原生,维持现值不增成本),
-    // 只改颜色;blur 面积与用户当前主题一致,零新增 GPU 开销。
-    const injectAppleTheme = (config) => {
-        const { $ } = getCore();
-        if (!$) return;
-        const $appleTheme = $('#acu-v2-apple-theme');
-        if (config.appleTheme) {
-            if (!$appleTheme.length) {
-                const css = `
-                    <style id="acu-v2-apple-theme">
-                        /* 苹果毛玻璃:覆盖 ST SmartTheme 变量,材料机制由 ST 原生 backdrop-filter 承担。
-                           可读性(V17.2.4 修复):玻璃底 0.85-0.9 近实色(apple skill 0.8 平衡点 +
-                           数据库夺舍 0.85 教训)——半透明过透时底下深色内容透上来,深字对比崩。 */
-                        :root {
-                            --SmartThemeBodyColor: #1d1d1f !important;
-                            --SmartThemeEmColor: #6e6e73 !important;
-                            --SmartThemeUnderlineColor: #007aff !important;
-                            --SmartThemeQuoteColor: #007aff !important;
-                            --SmartThemeBlurTintColor: rgba(250, 250, 252, 0.88) !important;
-                            --SmartThemeChatTintColor: rgba(250, 250, 252, 0.9) !important;
-                            --SmartThemeUserMesBlurTintColor: rgba(0, 122, 255, 0.1) !important;
-                            --SmartThemeBotMesBlurTintColor: rgba(255, 255, 255, 0.85) !important;
-                            --SmartThemeBorderColor: rgba(255, 255, 255, 0.7) !important;
-                            --SmartThemeShadowColor: rgba(0, 0, 0, 0.1) !important;
-                            /* 保持 blurStrength 现值:全屏 #chat blur 不增成本;苹果感靠白色 tint + 亮边 */
-                        }
-                        /* 亮顶边(光打在材料上):顶栏/输入框/侧栏补一条高光边,ST 默认缺这个苹果特征 */
-                        #top-bar, #send_form, #options, #floatingPrompt {
-                            border-top: 1px solid rgba(255, 255, 255, 0.7) !important;
-                            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset, 0 2px 12px rgba(0, 0, 0, 0.06) !important;
-                        }
-                        /* 聊天区:近实白底保证消息文字对比,不额外加 blur */
-                        #chat {
-                            background-color: rgba(250, 250, 252, 0.92) !important;
-                        }
-                        /* 输入框:实白底保证打字可读(保留 ST 原生底部圆角,send_form 在屏底) */
-                        #send_form {
-                            background-color: rgba(255, 255, 255, 0.95) !important;
-                        }
-                        /* 气泡:用户侧淡蓝实色、AI 侧白实色,苹果风格,深字可读。
-                           TT/ST 消息节点用 is_user 属性(非 user_mes/bot_mes 类,explore-67 实证) */
-                        .mes[is_user="true"] .mes_block { background-color: rgba(0, 122, 255, 0.85) !important; color: #ffffff !important; border-radius: 14px 14px 14px 4px !important; }
-                        .mes[is_user="false"] .mes_block, .mes:not([is_user="true"]) .mes_block { background-color: rgba(255, 255, 255, 0.92) !important; border-radius: 14px 14px 4px 14px !important; }
-                        /* 用户气泡内的次级文字/时间戳也转白,保证对比 */
-                        .mes[is_user="true"] .mes_block .mes_text, .mes[is_user="true"] .mes_block .mes_timestamp { color: #ffffff !important; }
-                    </style>
-                `;
-                $('head').append(css);
-            }
-        } else if ($appleTheme.length) {
-            $appleTheme.remove();
-        }
-    };
-
     const injectDatabaseStyles = (config) => {
         const { $ } = getCore();
         if (!$) return;
@@ -739,7 +680,6 @@
         }
 
         injectDatabaseStyles(config);
-        injectAppleTheme(config);
     };
 
     const addStyles = () => {
@@ -2075,15 +2015,6 @@
                                     </label>
                                 </div>
                             </div>
-                            <div class="acu-control-row">
-                                <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">苹果主题</span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">整个酒馆界面套苹果毛玻璃(顶栏/侧栏/输入框/聊天区),关闭恢复原主题</span></div>
-                                <div class="acu-input-col">
-                                    <label class="acu-switch">
-                                        <input type="checkbox" id="cfg-apple-theme" ${config.appleTheme ? 'checked' : ''}>
-                                        <span class="acu-slider-switch"></span>
-                                    </label>
-                                </div>
-                            </div>
                             <div class="acu-control-row" id="row-db-accent" style="display:${config.dbAppleGlass ? 'flex' : 'none'}">
                                 <div class="acu-label-col"><span class="acu-label-main">数据库UI主色调</span><span class="acu-label-sub" style="font-weight:normal">苹果毛玻璃的强调色</span></div>
                                 <div class="acu-input-col">
@@ -2476,10 +2407,6 @@ ${allTableNames.map(tName => {
             saveConfig({ dbAppleGlass: on });
             // 主色调行仅苹果风开启时显示(联动显隐)
             dialog.find('#row-db-accent').css('display', on ? 'flex' : 'none');
-        });
-
-        dialog.find('#cfg-apple-theme').on('change', function() {
-            saveConfig({ appleTheme: $(this).is(':checked') }); // saveConfig → applyConfigStyles → injectAppleTheme
         });
 
         dialog.find('#cfg-debug-mode').on('change', function() {
