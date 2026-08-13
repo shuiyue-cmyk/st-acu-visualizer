@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.2.3'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.2.4'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -479,18 +479,20 @@
             if (!$appleTheme.length) {
                 const css = `
                     <style id="acu-v2-apple-theme">
-                        /* 苹果毛玻璃:覆盖 ST SmartTheme 变量,材料机制由 ST 原生 backdrop-filter 承担 */
+                        /* 苹果毛玻璃:覆盖 ST SmartTheme 变量,材料机制由 ST 原生 backdrop-filter 承担。
+                           可读性(V17.2.4 修复):玻璃底 0.85-0.9 近实色(apple skill 0.8 平衡点 +
+                           数据库夺舍 0.85 教训)——半透明过透时底下深色内容透上来,深字对比崩。 */
                         :root {
                             --SmartThemeBodyColor: #1d1d1f !important;
                             --SmartThemeEmColor: #6e6e73 !important;
                             --SmartThemeUnderlineColor: #007aff !important;
                             --SmartThemeQuoteColor: #007aff !important;
-                            --SmartThemeBlurTintColor: rgba(250, 250, 252, 0.6) !important;
-                            --SmartThemeChatTintColor: rgba(250, 250, 252, 0.65) !important;
-                            --SmartThemeUserMesBlurTintColor: rgba(0, 122, 255, 0.06) !important;
-                            --SmartThemeBotMesBlurTintColor: rgba(255, 255, 255, 0.45) !important;
-                            --SmartThemeBorderColor: rgba(255, 255, 255, 0.55) !important;
-                            --SmartThemeShadowColor: rgba(0, 0, 0, 0.12) !important;
+                            --SmartThemeBlurTintColor: rgba(250, 250, 252, 0.88) !important;
+                            --SmartThemeChatTintColor: rgba(250, 250, 252, 0.9) !important;
+                            --SmartThemeUserMesBlurTintColor: rgba(0, 122, 255, 0.1) !important;
+                            --SmartThemeBotMesBlurTintColor: rgba(255, 255, 255, 0.85) !important;
+                            --SmartThemeBorderColor: rgba(255, 255, 255, 0.7) !important;
+                            --SmartThemeShadowColor: rgba(0, 0, 0, 0.1) !important;
                             /* 保持 blurStrength 现值:全屏 #chat blur 不增成本;苹果感靠白色 tint + 亮边 */
                         }
                         /* 亮顶边(光打在材料上):顶栏/输入框/侧栏补一条高光边,ST 默认缺这个苹果特征 */
@@ -498,18 +500,20 @@
                             border-top: 1px solid rgba(255, 255, 255, 0.7) !important;
                             box-shadow: 0 1px 0 rgba(255, 255, 255, 0.35) inset, 0 2px 12px rgba(0, 0, 0, 0.06) !important;
                         }
-                        /* 聊天区:纯白微透,文字深色可读;不额外加 blur */
+                        /* 聊天区:近实白底保证消息文字对比,不额外加 blur */
                         #chat {
-                            background-color: rgba(250, 250, 252, 0.72) !important;
+                            background-color: rgba(250, 250, 252, 0.92) !important;
                         }
-                        /* 输入框:更实的白底保证打字可读(保留 ST 原生底部圆角,send_form 在屏底) */
+                        /* 输入框:实白底保证打字可读(保留 ST 原生底部圆角,send_form 在屏底) */
                         #send_form {
-                            background-color: rgba(255, 255, 255, 0.85) !important;
+                            background-color: rgba(255, 255, 255, 0.95) !important;
                         }
-                        /* 气泡:用户侧淡蓝、AI 侧白,苹果风格。
+                        /* 气泡:用户侧淡蓝实色、AI 侧白实色,苹果风格,深字可读。
                            TT/ST 消息节点用 is_user 属性(非 user_mes/bot_mes 类,explore-67 实证) */
-                        .mes[is_user="true"] .mes_block { background-color: rgba(0, 122, 255, 0.08) !important; border-radius: 14px 14px 14px 4px !important; }
-                        .mes[is_user="false"] .mes_block, .mes:not([is_user="true"]) .mes_block { background-color: rgba(255, 255, 255, 0.85) !important; border-radius: 14px 14px 4px 14px !important; }
+                        .mes[is_user="true"] .mes_block { background-color: rgba(0, 122, 255, 0.85) !important; color: #ffffff !important; border-radius: 14px 14px 14px 4px !important; }
+                        .mes[is_user="false"] .mes_block, .mes:not([is_user="true"]) .mes_block { background-color: rgba(255, 255, 255, 0.92) !important; border-radius: 14px 14px 4px 14px !important; }
+                        /* 用户气泡内的次级文字/时间戳也转白,保证对比 */
+                        .mes[is_user="true"] .mes_block .mes_text, .mes[is_user="true"] .mes_block .mes_timestamp { color: #ffffff !important; }
                     </style>
                 `;
                 $('head').append(css);
