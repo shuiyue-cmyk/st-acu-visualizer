@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.2.5'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.2.6'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -114,7 +114,8 @@
         dbTransparentMap: {},
         dbAppleGlass: false,
         dbAccent: 'blue',
-        debugMode: false
+        debugMode: false,
+        appleTheme: false
     };
 
     const THEMES = [
@@ -464,6 +465,67 @@
         return diffSet;
     };
 
+    // ── 酒馆界面(SillyTavern/TauriTavern)苹果主题夺舍(按 apple-skills 官方 Liquid Glass 规范) ──
+    // 官方原则(adopting-liquid-glass):Liquid Glass 只应用于顶层导航元素(Tab bar/Sidebar 浮在
+    // 玻璃层),内容层保持实色——「玻璃是局部控件材质,不是整屏」。转译落地:
+    // ①玻璃只给导航层(#top-bar/#send_form/#options 等,小面积 + ST 原生 blur,零新增成本);
+    // ②聊天区实色内容层(可读性稳,不增全屏 blur);③「Combine effects for rendering performance」
+    // (官方:443)玻璃合并到外层容器;④可读性:玻璃 0.85+ 近实、气泡实底。
+    const injectAppleTheme = (config) => {
+        const { $ } = getCore();
+        if (!$) return;
+        const $appleTheme = $('#acu-v2-apple-theme');
+        if (config.appleTheme) {
+            if (!$appleTheme.length) {
+                const css = `
+                    <style id="acu-v2-apple-theme">
+                        /* 苹果 Liquid Glass:覆盖 ST SmartTheme 变量;材质机制由 ST 原生 backdrop-filter 承担 */
+                        :root {
+                            --SmartThemeBodyColor: #1d1d1f !important;
+                            --SmartThemeEmColor: #6e6e73 !important;
+                            --SmartThemeUnderlineColor: #007aff !important;
+                            --SmartThemeQuoteColor: #007aff !important;
+                            /* 导航层玻璃:近实白(0.88),官方「克制用色保证可读」 */
+                            --SmartThemeBlurTintColor: rgba(250, 250, 252, 0.88) !important;
+                            /* 聊天区:实色内容层(官方:内容不浮玻璃层),可读性优先 */
+                            --SmartThemeChatTintColor: rgba(250, 250, 252, 0.94) !important;
+                            --SmartThemeUserMesBlurTintColor: rgba(0, 122, 255, 0.12) !important;
+                            --SmartThemeBotMesBlurTintColor: rgba(255, 255, 255, 0.9) !important;
+                            --SmartThemeBorderColor: rgba(255, 255, 255, 0.7) !important;
+                            --SmartThemeShadowColor: rgba(0, 0, 0, 0.1) !important;
+                            /* 保持 blurStrength 现值:导航层小面积 blur,不增全屏成本 */
+                        }
+                        /* 导航层亮顶边(光打在材料上):官方玻璃材质的顶部高光特征 */
+                        #top-bar, #send_form, #options, #floatingPrompt {
+                            border-top: 1px solid rgba(255, 255, 255, 0.75) !important;
+                            box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset, 0 2px 12px rgba(0, 0, 0, 0.06) !important;
+                        }
+                        /* 聊天区:近实白底,消息文字对比稳;显式关闭 ST 原生全屏 blur
+                           (T9 铁律:全屏容器 backdrop-filter=每帧整屏高斯模糊,卡顿源),
+                           内容层实色零 GPU 成本 */
+                        #chat {
+                            background-color: rgba(250, 250, 252, 0.94) !important;
+                            -webkit-backdrop-filter: none !important;
+                            backdrop-filter: none !important;
+                        }
+                        /* 输入框:实白底打字可读(保留 ST 原生底部圆角,send_form 在屏底) */
+                        #send_form {
+                            background-color: rgba(255, 255, 255, 0.96) !important;
+                        }
+                        /* 气泡实底:用户侧淡蓝+白字、AI 侧白+深字,苹果风格。
+                           TT/ST 消息节点用 is_user 属性(explore-67 实证) */
+                        .mes[is_user="true"] .mes_block { background-color: rgba(0, 122, 255, 0.88) !important; color: #ffffff !important; border-radius: 14px 14px 14px 4px !important; }
+                        .mes[is_user="false"] .mes_block, .mes:not([is_user="true"]) .mes_block { background-color: rgba(255, 255, 255, 0.94) !important; border-radius: 14px 14px 4px 14px !important; }
+                        .mes[is_user="true"] .mes_block .mes_text, .mes[is_user="true"] .mes_block .mes_timestamp { color: #ffffff !important; }
+                    </style>
+                `;
+                $('head').append(css);
+            }
+        } else if ($appleTheme.length) {
+            $appleTheme.remove();
+        }
+    };
+
     const injectDatabaseStyles = (config) => {
         const { $ } = getCore();
         if (!$) return;
@@ -680,6 +742,7 @@
         }
 
         injectDatabaseStyles(config);
+        injectAppleTheme(config);
     };
 
     const addStyles = () => {
@@ -2015,6 +2078,15 @@
                                     </label>
                                 </div>
                             </div>
+                            <div class="acu-control-row">
+                                <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">苹果主题</span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">酒馆界面导航层套 Liquid Glass(顶栏/输入框毛玻璃),聊天区保持实色清晰</span></div>
+                                <div class="acu-input-col">
+                                    <label class="acu-switch">
+                                        <input type="checkbox" id="cfg-apple-theme" ${config.appleTheme ? 'checked' : ''}>
+                                        <span class="acu-slider-switch"></span>
+                                    </label>
+                                </div>
+                            </div>
                             <div class="acu-control-row" id="row-db-accent" style="display:${config.dbAppleGlass ? 'flex' : 'none'}">
                                 <div class="acu-label-col"><span class="acu-label-main">数据库UI主色调</span><span class="acu-label-sub" style="font-weight:normal">苹果毛玻璃的强调色</span></div>
                                 <div class="acu-input-col">
@@ -2407,6 +2479,10 @@ ${allTableNames.map(tName => {
             saveConfig({ dbAppleGlass: on });
             // 主色调行仅苹果风开启时显示(联动显隐)
             dialog.find('#row-db-accent').css('display', on ? 'flex' : 'none');
+        });
+
+        dialog.find('#cfg-apple-theme').on('change', function() {
+            saveConfig({ appleTheme: $(this).is(':checked') }); // saveConfig → applyConfigStyles → injectAppleTheme
         });
 
         dialog.find('#cfg-debug-mode').on('change', function() {
