@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.2.8'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.2.9'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -123,7 +123,8 @@
         dbTransparentMap: {},
         dbAppleGlass: false,
         dbAccent: 'blue',
-        debugMode: false
+        debugMode: false,
+        appleTheme: false
     };
 
     const THEMES = [
@@ -473,6 +474,75 @@
         return diffSet;
     };
 
+    // ── 酒馆界面苹果主题（按 Apple Liquid Glass 规范） ──
+    // Liquid Glass 只用于顶层导航/输入控件，聊天内容层保持实色，避免给整屏内容
+    // 新增 backdrop-filter。ST/TauriTavern 原生已有 SmartTheme 材质变量与局部 blur，
+    // 这里只覆盖颜色、边缘高光和内容层表面，保持原有 blurStrength 与 GPU 负载。
+    const injectAppleTheme = (config) => {
+        const { $ } = getCore();
+        if (!$) return;
+        const $theme = $('#acu-v2-apple-theme');
+        if (config.appleTheme) {
+            if ($theme.length) return;
+            const css = `
+                <style id="acu-v2-apple-theme">
+                    /* SmartTheme variables verified against TauriTavern/ST style.css */
+                    :root {
+                        --SmartThemeBodyColor: #1d1d1f !important;
+                        --SmartThemeEmColor: #6e6e73 !important;
+                        --SmartThemeUnderlineColor: #007aff !important;
+                        --SmartThemeQuoteColor: #007aff !important;
+                        --SmartThemeBlurTintColor: rgba(250, 250, 252, 0.88) !important;
+                        --SmartThemeChatTintColor: rgba(250, 250, 252, 0.94) !important;
+                        --SmartThemeUserMesBlurTintColor: rgba(0, 122, 255, 0.12) !important;
+                        --SmartThemeBotMesBlurTintColor: rgba(255, 255, 255, 0.9) !important;
+                        --SmartThemeBorderColor: rgba(255, 255, 255, 0.7) !important;
+                        --SmartThemeShadowColor: rgba(0, 0, 0, 0.1) !important;
+                    }
+
+                    /* Navigation layer: reuse ST's existing local blur, no new full-screen blur. */
+                    #top-bar,
+                    #send_form,
+                    #options,
+                    #floatingPrompt {
+                        border-top: 1px solid rgba(255, 255, 255, 0.75) !important;
+                        box-shadow: 0 1px 0 rgba(255, 255, 255, 0.4) inset,
+                                    0 2px 12px rgba(0, 0, 0, 0.06) !important;
+                    }
+
+                    /* Content layer: opaque enough for reliable text contrast. */
+                    #chat {
+                        background-color: rgba(250, 250, 252, 0.94) !important;
+                        -webkit-backdrop-filter: none !important;
+                        backdrop-filter: none !important;
+                    }
+                    #send_form {
+                        background-color: rgba(255, 255, 255, 0.96) !important;
+                    }
+
+                    /* TauriTavern/ST messages use the is_user attribute, not user_mes/bot_mes classes. */
+                    .mes[is_user="true"] .mes_block {
+                        background-color: #007aff !important;
+                        color: #ffffff !important;
+                        border-radius: 14px 14px 14px 4px !important;
+                    }
+                    .mes[is_user="false"] .mes_block,
+                    .mes:not([is_user="true"]) .mes_block {
+                        background-color: #ffffff !important;
+                        border-radius: 14px 14px 4px 14px !important;
+                    }
+                    .mes[is_user="true"] .mes_block .mes_text,
+                    .mes[is_user="true"] .mes_block .mes_timestamp {
+                        color: #ffffff !important;
+                    }
+                </style>
+            `;
+            $('head').append(css);
+        } else {
+            $theme.remove();
+        }
+    };
+
     const injectDatabaseStyles = (config) => {
         const { $ } = getCore();
         if (!$) return;
@@ -689,6 +759,7 @@
         }
 
         injectDatabaseStyles(config);
+        injectAppleTheme(config);
     };
 
     const addStyles = () => {
@@ -2024,6 +2095,15 @@
                                     </label>
                                 </div>
                             </div>
+                            <div class="acu-control-row">
+                                <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">苹果主题</span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">酒馆界面导航层套 Liquid Glass,聊天区保持实色清晰</span></div>
+                                <div class="acu-input-col">
+                                    <label class="acu-switch">
+                                        <input type="checkbox" id="cfg-apple-theme" ${config.appleTheme ? 'checked' : ''}>
+                                        <span class="acu-slider-switch"></span>
+                                    </label>
+                                </div>
+                            </div>
                             <div class="acu-control-row" id="row-db-accent" style="display:${config.dbAppleGlass ? 'flex' : 'none'}">
                                 <div class="acu-label-col"><span class="acu-label-main">数据库UI主色调</span><span class="acu-label-sub" style="font-weight:normal">苹果毛玻璃的强调色</span></div>
                                 <div class="acu-input-col">
@@ -2416,6 +2496,10 @@ ${allTableNames.map(tName => {
             saveConfig({ dbAppleGlass: on });
             // 主色调行仅苹果风开启时显示(联动显隐)
             dialog.find('#row-db-accent').css('display', on ? 'flex' : 'none');
+        });
+
+        dialog.find('#cfg-apple-theme').on('change', function() {
+            saveConfig({ appleTheme: $(this).is(':checked') });
         });
 
         dialog.find('#cfg-debug-mode').on('change', function() {
