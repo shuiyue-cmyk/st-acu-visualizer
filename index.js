@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.0'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.1'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -56,6 +56,10 @@
     let catchupLastFp = null;
     let catchupStartTs = 0;
     let catchupFallbackTimer = null;
+    // 填表轮询模块级单例(17.3.1 提升):fillPoll 与 catchupPoll 互斥需双向,
+    // bindEvents 的追平启动路径要能停掉 init 里的填表轮询,必须放 IIFE 顶层。
+    let fillPollTimer = null;
+    const stopFillPoll = () => { if (fillPollTimer) { clearInterval(fillPollTimer); fillPollTimer = null; } };
     // 模块级：停止追平轮询（含兜底 timer）。供 click 闭包与 CHAT_CHANGED 共用，
     // 切聊天时必须停掉旧追平轮询，避免对新聊天误弹 toast / 误刷新（跨聊天污染）。
     const stopCatchupPoll = () => {
@@ -838,11 +842,11 @@
                         backdrop-filter: none !important;
                     }
                     /* 与 @supports 兜底一致并补齐：减透明时弹窗/详情卡也要提实 */
-                    .acu-edit-dialog.acu-theme-apple { background-color: #f5f5f7 !important; }
+                    .acu-edit-dialog.acu-theme-apple { background-color: #f5f5f7 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
                     .acu-edit-dialog.acu-theme-apple textarea,
                     .acu-edit-dialog.acu-theme-apple input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
                     .acu-edit-dialog.acu-theme-apple select { background-color: #ffffff !important; }
-                    .acu-quick-view-card.acu-theme-apple { background: #f5f5f7 !important; }
+                    .acu-quick-view-card.acu-theme-apple { background: #f5f5f7 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
                     .acu-quick-view-card.acu-theme-apple .acu-quick-view-header { background: #ffffff !important; }
                     .acu-quick-view-card.acu-theme-apple .acu-full-item,
                     .acu-quick-view-card.acu-theme-apple .acu-grid-item { background: #ffffff !important; }
@@ -1518,11 +1522,11 @@
                 }
                 /* 不支持 backdrop-filter 时设置弹窗/详情弹窗都提实背景 */
                 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-                    .acu-edit-dialog.acu-theme-apple { background-color: #f5f5f7 !important; }
+                    .acu-edit-dialog.acu-theme-apple { background-color: #f5f5f7 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
                     .acu-edit-dialog.acu-theme-apple textarea,
                     .acu-edit-dialog.acu-theme-apple input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
                     .acu-edit-dialog.acu-theme-apple select { background-color: #ffffff !important; }
-                    .acu-quick-view-card.acu-theme-apple { background: #f5f5f7 !important; }
+                    .acu-quick-view-card.acu-theme-apple { background: #f5f5f7 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
                     .acu-quick-view-card.acu-theme-apple .acu-quick-view-header { background: #ffffff !important; }
                     .acu-quick-view-card.acu-theme-apple .acu-full-item,
                     .acu-quick-view-card.acu-theme-apple .acu-grid-item { background: #ffffff !important; }
@@ -1563,12 +1567,12 @@
                 const s = data[k];
                 if (!s || !Array.isArray(s.content) || s.content.length === 0) { out += k + ':0;'; continue; }
                 out += k + ':' + s.content.length + ';';
-                // 隔行采样前 20 行（步长 2）每行前 6 列，再加末行前 6 列。
-                // 行数变化已由长度部分捕获。
-                const ROWS_SCAN = 20, COLS_SCAN = 6;
+                // 均匀采样约 40 行覆盖全表(步长随行数缩放),消除中间行盲区
+                // (追平补历史空洞会写中间行,固定前 20 行采样会漏检致提前判稳定)。
+                const COLS_SCAN = 6;
                 const n = s.content.length;
-                const rowLimit = Math.min(n, ROWS_SCAN);
-                for (let r = 0; r < rowLimit; r += 2) {
+                const step = Math.max(1, Math.ceil(n / 40));
+                for (let r = 0; r < n; r += step) {
                     const row = s.content[r];
                     if (Array.isArray(row)) {
                         const cl = Math.min(row.length, COLS_SCAN);
@@ -1576,7 +1580,7 @@
                     }
                     out += ';';
                 }
-                // 末行全列（补最新楼层写入；若末行在前 20 行内已采，此处重复但确定性一致）
+                // 末行全列（补最新楼层写入；若末行已被采样，此处重复但确定性一致）
                 const last = s.content[n - 1];
                 if (Array.isArray(last)) {
                     const cl = Math.min(last.length, COLS_SCAN);
@@ -1633,11 +1637,10 @@
                 const s = data[k];
                 if (!s || !Array.isArray(s.content) || s.content.length === 0) { out[k] = k + ':0;'; continue; }
                 let fp = k + ':' + s.content.length + ';';
-                // 全列采样:列数受 diffMap 64 列上限约束,全列成本可控且避免第 7+ 列变化误判「未变」
-                const ROWS_SCAN = 20;
+                // 全列采样 + 均匀约 40 行覆盖全表(步长随行数缩放),消除中间行盲区
                 const n = s.content.length;
-                const rowLimit = Math.min(n, ROWS_SCAN);
-                for (let r = 0; r < rowLimit; r += 2) {
+                const step = Math.max(1, Math.ceil(n / 40));
+                for (let r = 0; r < n; r += step) {
                     const row = s.content[r];
                     if (Array.isArray(row)) {
                         for (let cc = 0; cc < row.length; cc++) fp += (row[cc] ?? '') + '|';
@@ -3228,7 +3231,7 @@ ${allTableNames.map(tName => {
              return `
                 <div class="acu-dash-card" style="position:relative; width:100%; box-sizing:border-box; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
                     ${editBtn}
-                    <div class="acu-dash-title">${cfg.title || '未命名'}</div>
+                    <div class="acu-dash-title">${escapeHtml(cfg.title || '未命名')}</div>
                     ${contentHtml}
                 </div>
              `;
@@ -3250,7 +3253,7 @@ ${allTableNames.map(tName => {
                 const active = i === 0 ? 'active' : '';
                 const title = getSlotTitle(sid);
                 const tabId = `${groupId}-${sid}`;
-                header += `<div class="acu-tab-btn ${active}" data-target="${tabId}">${title} ${getTabEditBtn(sid)}</div>`;
+                header += `<div class="acu-tab-btn ${active}" data-target="${tabId}">${escapeHtml(title)} ${getTabEditBtn(sid)}</div>`;
                 body += `<div id="${tabId}" class="acu-tab-pane ${active}">${renderSlotContent(sid)}</div>`;
             });
             header += '</div>';
@@ -3628,8 +3631,9 @@ ${allTableNames.map(tName => {
 const checkRowChanged = (realIdx, row) => {
             if (currentDiffMap.has(`${tableName}-row-${realIdx}`)) return true;
             if (!row) return false;
-            // 大行保护：只扫前 64 列，避免单行超长把主线程拖死
-            const colLimit = Math.min(row.length, 64);
+            // 不设列上限:generateDiffMap 生成键无列上限,这里封顶会让第 65+ 列的高亮丢失
+            // (Set.has 是 O(1),不封顶无性能意义)
+            const colLimit = row.length;
             for (let c = 1; c < colLimit; c++) {
                 if (currentDiffMap.has(`${tableName}-${realIdx}-${c}`)) return true;
             }
@@ -4418,8 +4422,9 @@ const checkRowChanged = (realIdx, row) => {
                     try { renderInterface(true); } catch (_) {}
                     if (window.toastr) window.toastr.success(saved ? '追平完成，数据已刷新。' : '追平结束，数据已刷新。', { timeOut: 2500 });
                 };
-                // 连点保护：新点击先停掉旧轮询
+                // 连点保护：新点击先停掉旧轮询;同时停填表轮询(双向互斥,防 1.5s+2s 叠加重建)
                 stopCatchupPoll();
+                stopFillPoll();
                 catchupStable = 0;
                 catchupStartTs = Date.now();
                 // 首 tick 前先同步采样基线，避免把"追平刚开始还没写"误判为稳定
@@ -4536,7 +4541,7 @@ const checkRowChanged = (realIdx, row) => {
             <div class="acu-quick-view-overlay${overlayThemeClass(config.theme)}">
                 <div class="acu-quick-view-card acu-theme-${config.theme}" style="--acu-font-size: ${config.fontSize}px; font-size: ${config.fontSize}px; --acu-text-max-height:${config.limitLongText!==false?'80px':'none'}; --acu-text-overflow:${config.limitLongText!==false?'auto':'visible'}">
                      <div class="acu-quick-view-header">
-                        <span><i class="fa-solid ${getIconForTableName(tableName)}"></i> ${row[(titleColIdx !== undefined && titleColIdx !== null) ? titleColIdx : 1] || '详情'}</span>
+                        <span><i class="fa-solid ${getIconForTableName(tableName)}"></i> ${escapeHtml(row[(titleColIdx !== undefined && titleColIdx !== null) ? titleColIdx : 1] || '详情')}</span>
                         <button class="acu-header-btn" id="qv-close"><i class="fa-solid fa-times"></i></button>
                      </div>
                      <div class="acu-quick-view-body">
@@ -4769,7 +4774,13 @@ const checkRowChanged = (realIdx, row) => {
                 if (!ok) {
                     const newRow = headers.map(() => '');
                     sheet.content.push(newRow);
-                    await saveDataToDatabase(rawData, false, true);
+                    let savedOk = false;
+                    try { savedOk = (await saveDataToDatabase(rawData, false, true)) !== false; } catch (e) { console.warn('[ACU-API] 兜底保存异常:', e); }
+                    if (!savedOk) {
+                        sheet.content.pop(); // 保存失败:回滚幻影行,避免缓存残留
+                        if (window.toastr) window.toastr.error('插入新行失败，已回滚。');
+                        return;
+                    }
                 } else {
                     // 成功路径：让 DB 的更新回调驱动刷新，无需手动 render。
                 }
@@ -4930,14 +4941,14 @@ const checkRowChanged = (realIdx, row) => {
 
                         <div>
                             <label style="font-weight:bold; display:block; margin-bottom:5px;">显示标题</label>
-                            <input type="text" id="slot-title" value="${currentSlotCfg.title || ''}" class="acu-card-edit-input">
+                            <input type="text" id="slot-title" value="${escapeHtml(currentSlotCfg.title || '')}" class="acu-card-edit-input">
                         </div>
 
                         <div>
                             <label style="font-weight:bold; display:block; margin-bottom:5px;">绑定表格</label>
                             <select id="slot-table" class="acu-nice-select" style="width:100%">
                                 <option value="" ${!activeTableName ? "selected" : ""}>-- 请选择 --</option>
-                                ${tableNames.map(n => `<option value="${n}" ${n === activeTableName ? 'selected' : ''}>${n}</option>`).join('')}
+                                ${tableNames.map(n => `<option value="${escapeHtml(n)}" ${n === activeTableName ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
                             </select>
                         </div>
 
@@ -5126,13 +5137,10 @@ const checkRowChanged = (realIdx, row) => {
         const POLL_INTERVAL_MS = 2000;
         const POLL_STABLE_THRESHOLD = 3;   // 连续 3 次无变化 = 结束
         const POLL_MAX_MS = 5 * 60 * 1000; // 5 分钟硬上限
-        let fillPollTimer = null;
         let fillPollStable = 0;
         let fillPollStartedAt = 0;
         let fillPollLastFingerprint = null;
-
-        // 轻量指纹/inEditingContext 复用顶层定义（见 IIFE 顶层），避免兄弟闭包重复定义。
-        const stopFillPoll = () => { if (fillPollTimer) { clearInterval(fillPollTimer); fillPollTimer = null; } };
+        // fillPollTimer/stopFillPoll 已提升 IIFE 顶层(与 catchupPoll 双向互斥)
 
         const startFillPoll = () => {
             // 追平轮询在跑时不要再起填表轮询：两者各自 1.5s / 2s 独立触发
