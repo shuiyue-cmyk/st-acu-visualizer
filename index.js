@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.1'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.2'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -14,8 +14,8 @@
     const STORAGE_KEY_HIDDEN_TABLES = 'acu_hidden_tables';
     const STORAGE_KEY_TABLE_STYLES = 'acu_table_styles';
 
-    // HTML 转义工具(网络安全审查 deepseek-v4-pro):DB 表数据(表名/列名/单元格=角色卡/AI填表内容)
-    // 模板插值原样拼 HTML 是存储型 XSS 面,统一转义 & < > " ' 五字符。
+    // HTML 转义工具(网络安全审查 deepseek-v4-pro):DB 表数�?表名/列名/单元�?角色�?AI填表内容)
+    // 模板插值原样拼 HTML 是存储型 XSS �?统一转义 & < > " ' 五字符�?
     const escapeHtml = (v) => String(v == null ? '' : v)
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
@@ -32,45 +32,32 @@
     let isSaving = false;
     let isEditingOrder = false;
     let currentDiffMap = new Set();
-    // H-02 事件委托化状态
-    let bindEventsDelegated = false;
-    let latestTablesRef = null;
     let observer = null;
     let columnResizeObserver = null;
-    // H-05 Observer 单例化：三重监听的单例状态与 rAF 合并 flag 提升至模块级，避免每帧 disconnect/new
-    let chatObsRafPending = false;
-    let chatResizeRafPending = false;
-    let chatRoRafPending = false;
-    let chatObserversReady = false;
-    let lastObservedChatEl = null;
     let isCollapsed = (() => { try { return localStorage.getItem(STORAGE_KEY_UI_COLLAPSE) === 'true'; } catch (e) { return false; } })();
     let globalScrollTop = 0;
     let currentPage = 1;
     let currentSearchTerm = '';
-    // 性能审查 P2-1:搜索过滤结果缓存(键=表名+搜索词+数据指纹),翻页/重复渲染复用,
-    // 避免大表(5000×30)每次 render 全量 map+filter+sort;数据变化/搜索词变化即失效。
+    // 性能审查 P2-1:搜索过滤结果缓存(�?表名+搜索�?数据指纹),翻页/重复渲染复用,
+    // 避免大表(5000×30)每次 render 全量 map+filter+sort;数据变化/搜索词变化即失效�?
     let searchCacheKey = '';
     let searchCacheResult = null;
-    // 数据版本号:getTableData 每次产生新 clone 时递增,用于搜索缓存失效锚
-    // (rows 引用每次 render 重建,不能作锚;version 只在数据真正变化时变)。
+    // 数据版本�?getTableData 每次产生�?clone 时递增,用于搜索缓存失效�?
+    // (rows 引用每次 render 重建,不能作锚;version 只在数据真正变化时变)�?
     let dataVersion = 0;
     let selectedRows = new Map();
     let cachedTableData = null;
     let isMultiSelectMode = false;
     let pendingDeletes = new Set();
 
-    // 追平完成检测轮询的模块级单例状态：防止连点多个 setInterval 并存、双 finishCatchup。
+    // 追平完成检测轮询的模块级单例状态：防止连点多个 setInterval 并存、双 finishCatchup�?
     let catchupTimer = null;
     let catchupStable = 0;
     let catchupLastFp = null;
     let catchupStartTs = 0;
     let catchupFallbackTimer = null;
-    // 填表轮询模块级单例(17.3.1 提升):fillPoll 与 catchupPoll 互斥需双向,
-    // bindEvents 的追平启动路径要能停掉 init 里的填表轮询,必须放 IIFE 顶层。
-    let fillPollTimer = null;
-    const stopFillPoll = () => { if (fillPollTimer) { clearInterval(fillPollTimer); fillPollTimer = null; } };
-    // 模块级：停止追平轮询（含兜底 timer）。供 click 闭包与 CHAT_CHANGED 共用，
-    // 切聊天时必须停掉旧追平轮询，避免对新聊天误弹 toast / 误刷新（跨聊天污染）。
+    // 模块级：停止追平轮询（含兜底 timer）。供 click 闭包�?CHAT_CHANGED 共用�?
+    // 切聊天时必须停掉旧追平轮询，避免对新聊天误弹 toast / 误刷新（跨聊天污染）�?
     const stopCatchupPoll = () => {
         if (catchupTimer) { clearInterval(catchupTimer); catchupTimer = null; }
         if (catchupFallbackTimer) { clearTimeout(catchupFallbackTimer); catchupFallbackTimer = null; }
@@ -92,20 +79,20 @@
             return result;
         },
         handleUpdate: (incomingData) => {
-            // 不再让 _suppressNext 吞掉 DB 的填表完成通知：前一次保存的 2 秒抑制窗口
-            // 会挡住 DB 在填表结束时发的 _notifyTableUpdate，导致表格更新了前端没刷新。
-            // 填表流程的更新通知应始终放行。
+            // 不再�?_suppressNext 吞掉 DB 的填表完成通知：前一次保存的 2 秒抑制窗�?
+            // 会挡�?DB 在填表结束时发的 _notifyTableUpdate，导致表格更新了前端没刷新�?
+            // 填表流程的更新通知应始终放行�?
             if (isEditingOrder) return;
-            // 通知到达 = DB 数据已更新：失效全部缓存，走 renderInterface(true) 让 getTableData(true)
-            // 从 DB 统一 clone + 重算 diffMap（若走 renderInterface(false)，getTableData(false) 缓存
-            // 命中会重置 lastTableDataRefreshed，diffMap 高亮陈旧——交叉验证确认的缺陷）。
-            // 不手动 clone incomingData：通知时 DB 已换新引用，重拉即最新，避免双 clone。
+            // 通知到达 = DB 数据已更新：失效全部缓存，走 renderInterface(true) �?getTableData(true)
+            // �?DB 统一 clone + 重算 diffMap（若�?renderInterface(false)，getTableData(false) 缓存
+            // 命中会重�?lastTableDataRefreshed，diffMap 高亮陈旧——交叉验证确认的缺陷）�?
+            // 不手�?clone incomingData：通知�?DB 已换新引用，重拉即最新，避免�?clone�?
             lastRawTableRef = null;
             lastTableSetFingerprint = '';
             lastTableDataRefreshed = true;
-            // handleUpdate 由用户操作触发(updateCell/updateRow/deleteRow/insertRow 通知),频率低,
-            // 恢复全量重拉(cachedTableData=null):指纹采样会漏检 DB 侧中间行/删表修改(第二轮审查
-            // P1-1-A/B 实证),全量 clone ~6ms 可接受;fillPoll/catchupPoll 仍走 partial 保性能。
+            // handleUpdate 由用户操作触�?updateCell/updateRow/deleteRow/insertRow 通知),频率�?
+            // 恢复全量重拉(cachedTableData=null):指纹采样会漏检 DB 侧中间行/删表修改(第二轮审�?
+            // P1-1-A/B 实证),全量 clone ~6ms 可接�?fillPoll/catchupPoll 仍走 partial 保性能�?
             cachedTableData = null;
             renderInterface(true);
         }
@@ -158,8 +145,8 @@
         { id: 'lavender', name: '香薰衣草' }
     ];
 
-    // 毛玻璃类主题：overlay 需要拿到主题类才能套上「轻压暗 + 模糊」那组规则
-    // （普通主题的 overlay 用纯色压暗，不需要）。新增磨砂主题时加进这个表即可。
+    // 毛玻璃类主题：overlay 需要拿到主题类才能套上「轻压暗 + 模糊」那组规�?
+    // （普通主题的 overlay 用纯色压暗，不需要）。新增磨砂主题时加进这个表即可�?
     const GLASS_THEMES = ['apple', 'blushglass', 'lavender'];
     const overlayThemeClass = (theme) =>
         GLASS_THEMES.includes(theme) ? ` acu-theme-${theme}` : '';
@@ -176,24 +163,24 @@
     ];
 
     const HIGHLIGHT_COLORS = {
-        orange: { main: '#d35400', bg: 'rgba(211, 84, 0, 0.1)', name: '活力橙' },
+        orange: { main: '#d35400', bg: 'rgba(211, 84, 0, 0.1)', name: '活力�? },
         red:    { main: '#e91e63', bg: 'rgba(233, 30, 99, 0.1)', name: '绯红' },
         blue:   { main: '#2196f3', bg: 'rgba(33, 150, 243, 0.1)', name: '海蓝' },
         green:  { main: '#27ae60', bg: 'rgba(39, 174, 96, 0.1)', name: '翠绿' },
-        purple: { main: '#9b59b6', bg: 'rgba(155, 89, 182, 0.1)', name: '梦幻紫' },
-        cyan:   { main: '#00bcd4', bg: 'rgba(0, 188, 212, 0.1)', name: '青空蓝' },
+        purple: { main: '#9b59b6', bg: 'rgba(155, 89, 182, 0.1)', name: '梦幻�? },
+        cyan:   { main: '#00bcd4', bg: 'rgba(0, 188, 212, 0.1)', name: '青空�? },
         teal:   { main: '#1abc9c', bg: 'rgba(26, 188, 156, 0.1)', name: '青绿' }
     };
 
     const DB_ACCENTS = {
-        blue:   { name: '苹果蓝', accent: '#007aff', accent2: '#0a84ff', glow: 'rgba(0, 122, 255, 0.25)', hover: 'rgba(0, 122, 255, 0.08)' },
-        pink:   { name: '樱花粉', accent: '#e86b9a', accent2: '#f48fb1', glow: 'rgba(232, 107, 154, 0.25)', hover: 'rgba(232, 107, 154, 0.08)' },
-        green:  { name: '薄荷绿', accent: '#34c759', accent2: '#30d158', glow: 'rgba(52, 199, 89, 0.25)', hover: 'rgba(52, 199, 89, 0.08)' },
-        purple: { name: '葡萄紫', accent: '#af52de', accent2: '#bf5af2', glow: 'rgba(175, 82, 222, 0.25)', hover: 'rgba(175, 82, 222, 0.08)' },
+        blue:   { name: '苹果�?, accent: '#007aff', accent2: '#0a84ff', glow: 'rgba(0, 122, 255, 0.25)', hover: 'rgba(0, 122, 255, 0.08)' },
+        pink:   { name: '樱花�?, accent: '#e86b9a', accent2: '#f48fb1', glow: 'rgba(232, 107, 154, 0.25)', hover: 'rgba(232, 107, 154, 0.08)' },
+        green:  { name: '薄荷�?, accent: '#34c759', accent2: '#30d158', glow: 'rgba(52, 199, 89, 0.25)', hover: 'rgba(52, 199, 89, 0.08)' },
+        purple: { name: '葡萄�?, accent: '#af52de', accent2: '#bf5af2', glow: 'rgba(175, 82, 222, 0.25)', hover: 'rgba(175, 82, 222, 0.08)' },
         orange: { name: '暖橙', accent: '#ff9500', accent2: '#ffa233', glow: 'rgba(255, 149, 0, 0.25)', hover: 'rgba(255, 149, 0, 0.08)' },
     };
 
-    // 数据库UI玻璃风格 token:apple=苹果毛玻璃(强调色随主色调联动), lavender=香薰衣草(薰碧绮紫)
+    // 数据库UI玻璃风格 token:apple=苹果毛玻�?强调色随主色调联�?, lavender=香薰衣草(薰碧绮紫)
     const DB_GLASS_TOKENS = {
         apple: {
             bg0: 'rgba(244, 244, 247, 0.72)',
@@ -255,25 +242,25 @@
         sunset: { bgNav: 'linear-gradient(135deg, #fffaf0 0%, #fff9e6 50%, #fff5fa 100%)', bgPanel: 'linear-gradient(180deg, #fffcf5 0%, #fffafa 100%)', border: 'rgba(251, 146, 60, 0.85)', textMain: '#8a4a3b', textSub: '#d97757', btnBg: 'linear-gradient(135deg, rgba(251, 146, 60, 0.1), rgba(244, 114, 182, 0.1))', btnHover: 'linear-gradient(135deg, rgba(251, 146, 60, 0.2), rgba(244, 114, 182, 0.2))', btnActiveBg: 'linear-gradient(135deg, #ffab73, #f48fb1)', btnActiveText: '#fff', tableHead: 'linear-gradient(90deg, rgba(251, 191, 36, 0.1), rgba(251, 113, 133, 0.1))', tableHover: 'rgba(251, 146, 60, 0.05)', shadow: '0 8px 32px rgba(251, 146, 60, 0.15), 0 4px 16px rgba(244, 114, 182, 0.1)', cardBg: 'linear-gradient(145deg, #fffcf7, #fffafa)', badgeBg: '#fffaf5', menuBg: '#fff', menuText: '#8a4a3b', inputBg: 'rgba(255,255,255,0.7)', overlayBg: 'rgba(124, 45, 18, 0.1)' },
         starship: { uiColor: '#6366f1', bgNav: 'radial-gradient(ellipse at top, rgba(30, 27, 75, 0.98), rgba(15, 23, 42, 0.95)), linear-gradient(135deg, #1e1b4b 0%, #312e81 50%, #1e1b4b 100%)', bgPanel: 'linear-gradient(180deg, rgba(30, 27, 75, 0.98) 0%, rgba(49, 46, 129, 0.95) 100%)', border: 'rgba(199, 210, 254, 0.6)', textMain: '#ffffff', textSub: '#cccccc', btnBg: 'linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(236, 72, 153, 0.15), rgba(34, 211, 238, 0.1))', btnHover: 'linear-gradient(135deg, rgba(99, 102, 241, 0.3), rgba(236, 72, 153, 0.25), rgba(34, 211, 238, 0.2))', btnActiveBg: 'linear-gradient(135deg, #6366f1, #ec4899, #22d3ee)', btnActiveText: '#fff', tableHead: 'linear-gradient(90deg, rgba(99, 102, 241, 0.15), rgba(236, 72, 153, 0.1))', tableHover: 'rgba(99, 102, 241, 0.1)', shadow: '0 8px 40px rgba(99, 102, 241, 0.2), 0 4px 20px rgba(236, 72, 153, 0.1)', cardBg: 'linear-gradient(145deg, rgba(30, 27, 75, 0.95), rgba(49, 46, 129, 0.9))', badgeBg: 'rgba(99, 102, 241, 0.2)', menuBg: '#1e1b4b', menuText: '#e0e7ff', inputBg: 'rgba(0,0,0,0.4)', overlayBg: 'rgba(0,0,0,0.85)' },
         sky: { bgNav: 'linear-gradient(135deg, rgba(224, 242, 254, 0.95), rgba(238, 242, 255, 0.95))', bgPanel: 'linear-gradient(180deg, rgba(240, 249, 255, 0.95) 0%, rgba(230, 240, 255, 0.9) 100%)', border: 'rgba(56, 189, 248, 0.6)', textMain: '#000000', textSub: '#555555', uiColor: '#3b82f6', btnBg: 'linear-gradient(135deg, rgba(56, 189, 248, 0.15), rgba(129, 140, 248, 0.15))', btnHover: 'linear-gradient(135deg, rgba(56, 189, 248, 0.25), rgba(129, 140, 248, 0.25))', btnActiveBg: 'linear-gradient(135deg, #38bdf8, #818cf8)', btnActiveText: '#fff', tableHead: 'linear-gradient(90deg, rgba(56, 189, 248, 0.1), rgba(129, 140, 248, 0.1))', tableHover: 'rgba(56, 189, 248, 0.08)', shadow: '0 8px 32px rgba(56, 189, 248, 0.15), 0 4px 16px rgba(129, 140, 248, 0.1)', cardBg: 'linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(240, 249, 255, 0.95))', badgeBg: 'rgba(56, 189, 248, 0.2)', menuBg: '#f0f9ff', menuText: '#0f172a', inputBg: 'rgba(255, 255, 255, 0.6)', overlayBg: 'rgba(15, 23, 42, 0.15)' },
-        // 苹果设计主题：参照 Apple 毛玻璃材料规范（WWDC Designing Fluid Interfaces / Materials）——
-        // 半透明毛玻璃背景 + 亮顶边（光打材料上）+ 深色系统文字；配合 .acu-nav-container 已内置的
-        // backdrop-filter: blur(5px) 呈现 iOS 式 translucent material。accent 用苹果蓝 #007aff。
+        // 苹果设计主题：参�?Apple 毛玻璃材料规范（WWDC Designing Fluid Interfaces / Materials）—�?
+        // 半透明毛玻璃背�?+ 亮顶边（光打材料上）+ 深色系统文字；配�?.acu-nav-container 已内置的
+        // backdrop-filter: blur(5px) 呈现 iOS �?translucent material。accent 用苹果蓝 #007aff�?
         apple: { bgNav: 'rgba(246, 246, 246, 0.62)', bgPanel: 'rgba(248, 248, 250, 0.7)', border: 'rgba(255, 255, 255, 0.5)', textMain: '#1d1d1f', textSub: '#6e6e73', uiColor: '#007aff', btnBg: 'rgba(255, 255, 255, 0.55)', btnHover: 'rgba(255, 255, 255, 0.85)', btnActiveBg: '#007aff', btnActiveText: '#ffffff', tableHead: 'rgba(255, 255, 255, 0.5)', tableHover: 'rgba(0, 122, 255, 0.08)', shadow: '0 8px 32px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06)', cardBg: 'rgba(255, 255, 255, 0.6)', badgeBg: 'rgba(0, 122, 255, 0.12)', menuBg: 'rgba(255, 255, 255, 0.85)', menuText: '#1d1d1f', inputBg: 'rgba(255, 255, 255, 0.65)', overlayBg: 'rgba(0, 0, 0, 0.35)' },
-        // 克劳德风（Anthropic 设计系统）：色值取自官方 design token（bg-base #ECE9E0 /
+        // 克劳德风（Anthropic 设计系统）：色值取自官�?design token（bg-base #ECE9E0 /
         // bg-raised #F5F3EC / bg-overlay #FDFCF8 / text #141413 / secondary #6B6860 /
         // border-default #D8D5CC / border-subtle #E8E6DC / accent-orange #D97757 /
-        // accent-warm #C96442）。特征是暖米色纸感底 + 克制的橙作强调，不用霓虹不用渐变；
-        // 卡片按官方「工具优先」规范以边框代阴影，所以 shadow 压得极淡。
+        // accent-warm #C96442）。特征是暖米色纸感底 + 克制的橙作强调，不用霓虹不用渐变�?
+        // 卡片按官方「工具优先」规范以边框代阴影，所�?shadow 压得极淡�?
         claude: { bgNav: '#ECE9E0', bgPanel: '#F5F3EC', border: '#D8D5CC', textMain: '#141413', textSub: '#6B6860', uiColor: '#C96442', btnBg: '#FDFCF8', btnHover: '#E8E6DC', btnActiveBg: '#D97757', btnActiveText: '#FAF9F5', tableHead: '#ECE9E0', tableHover: '#F5F3EC', shadow: 'rgba(20, 20, 19, 0.06)', cardBg: '#FDFCF8', badgeBg: 'rgba(217, 119, 87, 0.12)', menuBg: '#FDFCF8', menuText: '#141413', inputBg: '#FDFCF8', overlayBg: 'rgba(20, 20, 19, 0.45)' },
-        // 粉白磨砂：沿用苹果主题那套毛玻璃材料机制（半透明底 + backdrop blur + 亮顶边），
-        // 但把色相挪到暖粉。白是主体——所有面/卡片/按钮底都是高透明度白，只在
-        // 边框/hover/激活/徽章这些「点」上用粉，避免整片糊成粉色。
-        // accent 用玫瑰粉 #e86b9a（比 hotpink 稳，压得住白底上的文字对比度）。
+        // 粉白磨砂：沿用苹果主题那套毛玻璃材料机制（半透明�?+ backdrop blur + 亮顶边）�?
+        // 但把色相挪到暖粉。白是主体——所有面/卡片/按钮底都是高透明度白，只�?
+        // 边框/hover/激�?徽章这些「点」上用粉，避免整片糊成粉色�?
+        // accent 用玫瑰粉 #e86b9a（比 hotpink 稳，压得住白底上的文字对比度）�?
         // 注意 shadow 必须给「纯色」不能给 box-shadow 简写：全部 11 处消费方都是
         // `box-shadow: 0 4px 15px var(--acu-shadow)`，塞简写会让整条声明失效变成无阴影
-        // （apple 主题就是这么写的，实测它其实一处阴影都没渲染）。
+        // （apple 主题就是这么写的，实测它其实一处阴影都没渲染）�?
         blushglass: { bgNav: 'rgba(255, 252, 253, 0.78)', bgPanel: 'rgba(255, 253, 254, 0.8)', border: 'rgba(232, 107, 154, 0.24)', textMain: '#3d2b33', textSub: '#8a7480', uiColor: '#d1568a', btnBg: 'rgba(255, 250, 252, 0.82)', btnHover: 'rgba(255, 235, 243, 0.95)', btnActiveBg: '#e86b9a', btnActiveText: '#ffffff', tableHead: 'rgba(255, 240, 247, 0.78)', tableHover: 'rgba(232, 107, 154, 0.07)', shadow: 'rgba(209, 86, 138, 0.16)', cardBg: 'rgba(255, 255, 255, 0.8)', badgeBg: 'rgba(232, 107, 154, 0.12)', menuBg: 'rgba(255, 252, 253, 0.95)', menuText: '#3d2b33', inputBg: 'rgba(255, 255, 255, 0.85)', overlayBg: 'rgba(120, 60, 85, 0.3)' },
-        // 香薰衣草(薰碧绮紫):薰衣草紫 + 薄荷绿淡,轻玻璃质感;accent #C7A3FF,深紫文字
+        // 香薰衣草(薰碧绮紫):薰衣草紫 + 薄荷绿淡,轻玻璃质�?accent #C7A3FF,深紫文字
         lavender: { bgNav: '#F2EBF7', bgPanel: '#F5EFFA', border: '#E1D6EA', textMain: '#2E163D', textSub: '#746084', uiColor: '#C7A3FF', btnBg: '#FBF8FF', btnHover: '#F2EBF7', btnActiveBg: '#C7A3FF', btnActiveText: '#2E163D', tableHead: '#F2EBF7', tableHover: 'rgba(198, 160, 255, 0.10)', shadow: 'rgba(68, 39, 96, 0.10)', cardBg: '#FBF8FF', badgeBg: 'rgba(199, 163, 255, 0.14)', menuBg: '#FBF8FF', menuText: '#2E163D', inputBg: 'rgba(255, 255, 255, 0.7)', overlayBg: 'rgba(68, 39, 96, 0.2)' }
     };
 
@@ -294,26 +281,19 @@
         if (!$els || !$els.length) return;
         $els.each(function() {
             const $t = $(this);
-            // M-08 passive:true + rAF 节流：scroll 高频触发，passive 避免阻塞主线程，rAF 合并样式写
-            let rafPending = false;
-            $t.off('scroll.fade').on('scroll.fade', { passive: true }, function() {
-                if (rafPending) return;
-                rafPending = true;
-                requestAnimationFrame(() => {
-                    rafPending = false;
-                    $t.addClass('acu-show-scroll');
-                    clearTimeout($t.data('fadeT'));
-                    $t.data('fadeT', setTimeout(() => {
-                        $t.removeClass('acu-show-scroll');
-                    }, 500));
-                });
+            $t.off('scroll.fade').on('scroll.fade', function() {
+                $t.addClass('acu-show-scroll');
+                clearTimeout($t.data('fadeT'));
+                $t.data('fadeT', setTimeout(() => {
+                    $t.removeClass('acu-show-scroll');
+                }, 500));
             });
         });
     };
 
     // 同时取旧 API（AutoCardUpdaterAPI，含 exportTableAsJson/updateCell 等）
-    // 与新 V2 API（AutoCardUpdaterV2API，含 open=打开带"基础模式/高手模式"切换的新工作台）。
-    // 两者由数据库分别挂载到 window 与可能的 host 窗口，互不重合。
+    // 与新 V2 API（AutoCardUpdaterV2API，含 open=打开�?基础模式/高手模式"切换的新工作台）�?
+    // 两者由数据库分别挂载到 window 与可能的 host 窗口，互不重合�?
     const getCore = () => {
         const w = window.parent || window;
         return {
@@ -329,7 +309,7 @@
         if (n.includes('主角') || n.includes('角色')) return 'fa-user-circle';
         if (n.includes('通用') || n.includes('全局') || n.includes('世界') || n.includes('设定')) return 'fa-globe-asia';
         if (n.includes('背包') || n.includes('物品') || n.includes('资源') || n.includes('物资')) return 'fa-briefcase';
-        if (n.includes('技能') || n.includes('武魂') || n.includes('功法') || n.includes('能力') || n.includes('神通') || n.includes('法术')) return 'fa-dragon';
+        if (n.includes('技�?) || n.includes('武魂') || n.includes('功法') || n.includes('能力') || n.includes('神�?) || n.includes('法术')) return 'fa-dragon';
         if (n.includes('势力') || n.includes('阵营') || n.includes('门派') || n.includes('组织')) return 'fa-flag';
         if (n.includes('关系') || n.includes('周边') || n.includes('npc') || n.includes('人物')) return 'fa-address-book';
         if (n.includes('任务') || n.includes('日志')) return 'fa-scroll';
@@ -342,12 +322,12 @@
 
     const getActiveTabState = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_ACTIVE_TAB)); } catch (e) { return null; } };
     const saveActiveTabState = (tableName) => { try { localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, JSON.stringify(tableName)); } catch (e) { console.error(e); } };
-    const getSavedTableOrder = () => { if (savedTableOrderCache !== null) return savedTableOrderCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_ORDER)); savedTableOrderCache = v; return v; } catch (e) { return null; } };
-    const saveTableOrder = (tableNames) => { savedTableOrderCache = tableNames ? [...tableNames] : tableNames; try { localStorage.setItem(STORAGE_KEY_TABLE_ORDER, JSON.stringify(tableNames)); } catch (e) { console.error(e); } };
-    const getSavedActionOrder = () => { if (savedActionOrderCache !== null) return savedActionOrderCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_ACTION_ORDER)); savedActionOrderCache = v; return v; } catch (e) { return null; } };
-    const saveActionOrder = (list) => { savedActionOrderCache = list ? [...list] : list; try { localStorage.setItem(STORAGE_KEY_ACTION_ORDER, JSON.stringify(list)); } catch (e) { console.error(e); } };
-    // 性能审查 P3-2:配置内存缓存——一次渲染内 getConfig 被调 8+ 次,避免每次都 JSON.parse;
-    // 缓存的是解析后的原始对象,getConfig 每次仍浅拷贝展开(DEFAULT_CONFIG + saved)防止脏写。
+    const getSavedTableOrder = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_ORDER)); } catch (e) { return null; } };
+    const saveTableOrder = (tableNames) => { try { localStorage.setItem(STORAGE_KEY_TABLE_ORDER, JSON.stringify(tableNames)); } catch (e) { console.error(e); } };
+    const getSavedActionOrder = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_ACTION_ORDER)); } catch (e) { return null; } };
+    const saveActionOrder = (list) => { try { localStorage.setItem(STORAGE_KEY_ACTION_ORDER, JSON.stringify(list)); } catch (e) { console.error(e); } };
+    // 性能审查 P3-2:配置内存缓存——一次渲染内 getConfig 被调 8+ �?避免每次�?JSON.parse;
+    // 缓存的是解析后的原始对象,getConfig 每次仍浅拷贝展开(DEFAULT_CONFIG + saved)防止脏写�?
     let configCache = null;
     const getConfig = () => {
         try {
@@ -356,20 +336,20 @@
                 saved = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_CONFIG));
                 configCache = saved;
             }
-            // 配置迁移(16.10.21):液态玻璃时代(16.10.2~12)的「数据库UI风格」下拉,
-            // handler 写 saveConfig({dbStyle, dbAppleGlass: val!=='off'})——用户选「透明玻璃
+            // 配置迁移(16.10.21):液态玻璃时�?16.10.2~12)的「数据库UI风格」下�?
+            // handler �?saveConfig({dbStyle, dbAppleGlass: val!=='off'})——用户选「透明玻璃
             // (clear)」时也连带把 dbAppleGlass 写成 true。clear 已被删除(16.10.13),
             // 当前版本(16.10.1 基线)注入只认 dbAppleGlass,该残留会让选过液态玻璃的用户
-            // 误注入苹果毛玻璃 → 持续卡顿(实机报告:用过液态玻璃的用户卡,没用过的不卡)。
-            // 迁移:dbStyle==='clear' 的残留一律视为关闭,并一次性写回 localStorage,
+            // 误注入苹果毛玻璃 �?持续卡顿(实机报告:用过液态玻璃的用户�?没用过的不卡)�?
+            // 迁移:dbStyle==='clear' 的残留一律视为关�?并一次性写�?localStorage,
             // 让设置界面开关也同步显示关闭(避免「开关显示开但不生效」的困惑);
-            // dbStyle==='apple' 或手动开开关的真苹果用户不受影响(保持原值)。
+            // dbStyle==='apple' 或手动开开关的真苹果用户不受影�?保持原�?�?
             if (saved && saved.dbStyle === 'clear' && saved.dbAppleGlass) {
                 saved.dbAppleGlass = false;
                 try { localStorage.setItem(STORAGE_KEY_UI_CONFIG, JSON.stringify(saved)); } catch (_) {}
             }
-            // 迁移(17.3.0):旧「数据库UI苹果风」布尔开关用户(dbAppleGlass=true)迁移到
-            // 新的「数据库UI风格」枚举(dbGlassStyle='apple'),香薰衣草/关闭不受影响。
+            // 迁移(17.3.0):旧「数据库UI苹果风」布尔开关用�?dbAppleGlass=true)迁移�?
+            // 新的「数据库UI风格」枚�?dbGlassStyle='apple'),香薰衣草/关闭不受影响�?
             if (saved && saved.dbAppleGlass === true && !saved.dbGlassStyle) {
                 saved.dbGlassStyle = 'apple';
                 try { localStorage.setItem(STORAGE_KEY_UI_CONFIG, JSON.stringify(saved)); } catch (_) {}
@@ -379,23 +359,16 @@
     };
     const saveConfig = (newConfig) => { const current = getConfig(); const merged = { ...current, ...newConfig }; try { localStorage.setItem(STORAGE_KEY_UI_CONFIG, JSON.stringify(merged)); } catch (e) { console.error(e); } configCache = null; applyConfigStyles(merged); };
     
-    // M-03 存储缓存补齐：仿 getConfig:335 的 configCache 模式，内存缓存 + save 时失效，消除每 render 5-6 次 JSON.parse
-    let tableHeightsCache = null;
-    let tableStylesCache = null;
-    let dashConfigCache = null;
-    let hiddenTablesCache = null;
-    let savedTableOrderCache = null;
-    let savedActionOrderCache = null;
-    let reverseTablesCache = null;
-    const getTableHeights = () => { if (tableHeightsCache !== null) return tableHeightsCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_HEIGHTS)) || {}; tableHeightsCache = v; return v; } catch (e) { return {}; } };
-    const saveTableHeights = (heights) => { tableHeightsCache = heights ? { ...heights } : null; try { localStorage.setItem(STORAGE_KEY_TABLE_HEIGHTS, JSON.stringify(heights)); } catch (e) { console.error(e); } };
-    const getTableStyles = () => { if (tableStylesCache !== null) return tableStylesCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_STYLES)) || {}; tableStylesCache = v; return v; } catch (e) { return {}; } };
-    const saveTableStyles = (styles) => { tableStylesCache = styles ? { ...styles } : null; try { localStorage.setItem(STORAGE_KEY_TABLE_STYLES, JSON.stringify(styles)); } catch (e) { console.error(e); } };
-    const getDashConfig = () => { if (dashConfigCache !== null) return dashConfigCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_DASH_CONFIG)) || {}; dashConfigCache = v; return v; } catch (e) { return {}; } };
-    const saveDashConfig = (cfg) => { dashConfigCache = cfg ? { ...cfg } : null; try { localStorage.setItem(STORAGE_KEY_DASH_CONFIG, JSON.stringify(cfg)); } catch (e) { console.error(e); } };
+    const getTableHeights = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_HEIGHTS)) || {}; } catch (e) { return {}; } };
+    const saveTableHeights = (heights) => { try { localStorage.setItem(STORAGE_KEY_TABLE_HEIGHTS, JSON.stringify(heights)); } catch (e) { console.error(e); } };
 
-    // ── 调试报告采集(T29):用户遇可复现问题可开「调试模式」→ 复现 → 生成报告 →
-    //    打开 GitHub 预填 issue 页提交(无 token,数据只在用户浏览器与 GitHub 间流转)。
+    const getTableStyles = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_STYLES)) || {}; } catch (e) { return {}; } };
+    const saveTableStyles = (styles) => { try { localStorage.setItem(STORAGE_KEY_TABLE_STYLES, JSON.stringify(styles)); } catch (e) { console.error(e); } };
+    const getDashConfig = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DASH_CONFIG)) || {}; } catch (e) { return {}; } };
+    const saveDashConfig = (cfg) => { try { localStorage.setItem(STORAGE_KEY_DASH_CONFIG, JSON.stringify(cfg)); } catch (e) { console.error(e); } };
+
+    // ── 调试报告采集(T29):用户遇可复现问题可开「调试模式」→ 复现 �?生成报告 �?
+    //    打开 GitHub 预填 issue 页提�?�?token,数据只在用户浏览器与 GitHub 间流�?�?
     const debugErrors = [];
     const debugLongTasks = [];
     let debugObs = null;
@@ -413,13 +386,13 @@
     const debugHook = () => {
         if (debugErrorsHooked) return;
         debugErrorsHooked = true;
-        // 收集运行时错误(带时间戳)
+        // 收集运行时错�?带时间戳)
         try {
             window.addEventListener('error', debugOnError);
             debugOrigConsoleError = console.error;
             console.error = debugConsoleError;
         } catch (_) {}
-        // 长任务采集(>50ms 阻塞主线程 = 卡顿信号)
+        // 长任务采�?>50ms 阻塞主线�?= 卡顿信号)
         try {
             if (typeof PerformanceObserver === 'function') {
                 debugObs = new PerformanceObserver((list) => {
@@ -446,7 +419,7 @@
             time: new Date().toISOString(),
             extVersion: EXT_VERSION,
             ua: ua.slice(0, 300),
-            isTT: (window.__TAURITAVERN__) ? 'TauriTavern(TT)' : (/Tencent|MicroMessenger|QQ\//.test(ua) ? '可能(QQ/微信容器)' : (window.top !== window.self ? 'iframe' : '否')),
+            isTT: (window.__TAURITAVERN__) ? 'TauriTavern(TT)' : (/Tencent|MicroMessenger|QQ\//.test(ua) ? '可能(QQ/微信容器)' : (window.top !== window.self ? 'iframe' : '�?)),
             screen: (env.screen ? env.screen.width + 'x' + env.screen.height : '?') + ' dpr=' + (env.devicePixelRatio || 1),
             viewport: (env.innerWidth || '?') + 'x' + (env.innerHeight || '?'),
             stVersion: (env.SillyTavern && (env.SillyTavern.info ? (env.SillyTavern.info.version || '') : '')) || (env.ST ? 'ST存在' : ''),
@@ -458,7 +431,7 @@
             glassInjected: !!document.getElementById('acu-v2-apple'),
             configKeys: (() => { try { const c = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_CONFIG)); return c ? Object.keys(c).filter(k => !/snapshot/i.test(k)) : []; } catch (_) { return []; } })(),
         };
-        // 注入是否生效(DB UI 挂载时)
+        // 注入是否生效(DB UI 挂载�?
         try {
             const root = document.getElementById('acu-app-v2');
             report.dbUiMounted = !!root;
@@ -467,7 +440,7 @@
                 report.dbUiBg0 = cs.getPropertyValue('--acu-bg-0').trim() || 'n/a';
                 report.dbUiBackdrop = cs.backdropFilter || 'none';
             } else {
-                report.dbUiBg0 = 'n/a (DB UI 未挂载)';
+                report.dbUiBg0 = 'n/a (DB UI 未挂�?';
                 report.dbUiBackdrop = 'n/a';
             }
         } catch (_) {}
@@ -482,35 +455,22 @@
             + '屏幕: ' + report.screen + ' | 视口: ' + report.viewport + ' | 内存: ' + (typeof report.memory === 'string' ? report.memory : JSON.stringify(report.memory)) + '\n'
             + 'DOM节点: ' + report.domNodes + ' | DB UI挂载: ' + report.dbUiMounted + ' | 注入生效: ' + report.glassInjected + '\n'
             + 'DB bg0: ' + report.dbUiBg0 + ' | DB backdrop: ' + report.dbUiBackdrop + '\n\n'
-            + '复现步骤: (请填写)\n\n'
+            + '复现步骤: (请填�?\n\n'
             + '```json\n' + JSON.stringify(report, null, 2) + '\n```';
         return 'https://github.com/shuiyue-cmyk/st-acu-visualizer/issues/new?title=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
     };
 
 
-    const getReverseOrderTables = () => { if (reverseTablesCache !== null) return reverseTablesCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_REVERSE_TABLES)) || []; reverseTablesCache = v; return v; } catch (e) { return []; } };
-    const saveReverseOrderTables = (list) => { reverseTablesCache = list ? [...list] : list; try { localStorage.setItem(STORAGE_KEY_REVERSE_TABLES, JSON.stringify(list)); } catch (e) { console.error(e); } };
-    const getHiddenTables = () => { if (hiddenTablesCache !== null) return hiddenTablesCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_HIDDEN_TABLES)) || []; hiddenTablesCache = v; return v; } catch (e) { return []; } };
-    const saveHiddenTables = (list) => { hiddenTablesCache = list ? [...list] : list; try { localStorage.setItem(STORAGE_KEY_HIDDEN_TABLES, JSON.stringify(list)); } catch (e) { console.error(e); } };
-    // M-03 storage 事件同步：跨 tab 修改时失效对应缓存
-    try {
-        window.addEventListener('storage', (e) => {
-            if (!e || !e.key) return;
-            if (e.key === STORAGE_KEY_UI_CONFIG) configCache = null;
-            else if (e.key === STORAGE_KEY_TABLE_HEIGHTS) tableHeightsCache = null;
-            else if (e.key === STORAGE_KEY_TABLE_STYLES) tableStylesCache = null;
-            else if (e.key === STORAGE_KEY_DASH_CONFIG) dashConfigCache = null;
-            else if (e.key === STORAGE_KEY_HIDDEN_TABLES) hiddenTablesCache = null;
-            else if (e.key === STORAGE_KEY_TABLE_ORDER) savedTableOrderCache = null;
-            else if (e.key === STORAGE_KEY_ACTION_ORDER) savedActionOrderCache = null;
-            else if (e.key === STORAGE_KEY_REVERSE_TABLES) reverseTablesCache = null;
-        });
-    } catch (_) {}
+    const getReverseOrderTables = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_REVERSE_TABLES)) || []; } catch (e) { return []; } };
+    const saveReverseOrderTables = (list) => { try { localStorage.setItem(STORAGE_KEY_REVERSE_TABLES, JSON.stringify(list)); } catch (e) { console.error(e); } };
 
-    // 高楼层/大数据量下 localStorage 5MB 配额极易打满（纪要表尤甚）。
-    // 内存快照优先；localStorage 仅作冷启动兜底，写入失败静默降级。
+    const getHiddenTables = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_HIDDEN_TABLES)) || []; } catch (e) { return []; } };
+    const saveHiddenTables = (list) => { try { localStorage.setItem(STORAGE_KEY_HIDDEN_TABLES, JSON.stringify(list)); } catch (e) { console.error(e); } };
+
+    // 高楼�?大数据量�?localStorage 5MB 配额极易打满（纪要表尤甚）�?
+    // 内存快照优先；localStorage 仅作冷启动兜底，写入失败静默降级�?
     let memorySnapshot_ACU = null;
-    const SNAPSHOT_LS_MAX_CHARS = 1500000; // ~1.5MB 文本，预留配额给其他配置项
+    const SNAPSHOT_LS_MAX_CHARS = 1500000; // ~1.5MB 文本，预留配额给其他配置�?
     const loadSnapshot = () => {
         if (memorySnapshot_ACU) return memorySnapshot_ACU;
         try { return JSON.parse(localStorage.getItem(STORAGE_KEY_LAST_SNAPSHOT)); } catch (e) { return null; }
@@ -534,8 +494,8 @@
         const lastData = loadSnapshot();
         const diffSet = new Set();
         if (!lastData || !currentData) return diffSet;
-        // 高楼层保护：单表超过阈值时只标记新增尾部行，跳过逐格比对，
-        // 避免鸡尾酒开启后用户堆到高楼层时主线程被 diff 卡死导致纪要表像「无法显示」。
+        // 高楼层保护：单表超过阈值时只标记新增尾部行，跳过逐格比对�?
+        // 避免鸡尾酒开启后用户堆到高楼层时主线程被 diff 卡死导致纪要表像「无法显示」�?
         const HEAVY_ROW_THRESHOLD = 400;
         for (const sheetId in currentData) {
             const newSheet = currentData[sheetId];
@@ -573,20 +533,20 @@
         return diffSet;
     };
 
-    // ── 酒馆界面苹果主题（按 Apple Liquid Glass 规范） ──
-    // Liquid Glass 只用于顶层导航/输入控件，聊天内容层保持实色，避免给整屏内容
-    // 新增 backdrop-filter。ST/TauriTavern 原生已有 SmartTheme 材质变量与局部 blur，
-    // 这里只覆盖颜色、边缘高光和内容层表面，保持原有 blurStrength 与 GPU 负载。
+    // ── 酒馆界面苹果主题（按 Apple Liquid Glass 规范�?──
+    // Liquid Glass 只用于顶层导�?输入控件，聊天内容层保持实色，避免给整屏内容
+    // 新增 backdrop-filter。ST/TauriTavern 原生已有 SmartTheme 材质变量与局�?blur�?
+    // 这里只覆盖颜色、边缘高光和内容层表面，保持原有 blurStrength �?GPU 负载�?
     const injectDatabaseStyles = (config) => {
         const { $ } = getCore();
         if (!$) return;
-        // ── 数据库新 UI(#acu-app-v2,SP·数据库VIII)苹果毛玻璃模式 ──
-        // 开启时把 #acu-app-v2 的 23 个主题 token 全部
-        // 覆盖成苹果材料(半透明白 + blur 只给外层容器),关闭即移除、恢复 DB 原主题。
-        // DB 侧 applyTheme 会重写 <style id="acu-v2-theme">,但变量声明无 !important,
-        // 这里全部带 !important 且 style 后插入,层叠上必定压住 DB 重写。
-        // 不依赖任何 class:style 存在=开关开启,移除=恢复;选择器直接挂 #acu-app-v2,
-        // DB 异步挂载后规则声明式自动命中,无需 MutationObserver 补挂。
+        // ── 数据库新 UI(#acu-app-v2,SP·数据库VIII)苹果毛玻璃模�?──
+        // 开启时�?#acu-app-v2 �?23 个主�?token 全部
+        // 覆盖成苹果材�?半透明�?+ blur 只给外层容器),关闭即移除、恢�?DB 原主题�?
+        // DB �?applyTheme 会重�?<style id="acu-v2-theme">,但变量声明无 !important,
+        // 这里全部�?!important �?style 后插�?层叠上必定压�?DB 重写�?
+        // 不依赖任�?class:style 存在=开关开�?移除=恢复;选择器直接挂 #acu-app-v2,
+        // DB 异步挂载后规则声明式自动命中,无需 MutationObserver 补挂�?
         const $apple = $('#acu-v2-apple');
         const dbStyle = config.dbGlassStyle || 'off';
         if (dbStyle !== 'off') {
@@ -599,7 +559,7 @@
                     : { accent: accent.accent, accent2: accent.accent2, onAccent: '#ffffff', glow: accent.glow, hover: accent.hover };
                 const css = `
                     <style id="acu-v2-apple">
-                        /* 玻璃材料 token(全 !important 压 DB 侧 applyTheme 重写),按数据库UI风格切换配色 */
+                        /* 玻璃材料 token(�?!important �?DB �?applyTheme 重写),按数据库UI风格切换配色 */
                         #acu-app-v2 {
                             --acu-bg-0: ${t.bg0} !important;
                             --acu-bg-1: ${t.bg1} !important;
@@ -625,13 +585,13 @@
                             --acu-radius-sm: ${t.radiusSm} !important;
                             --acu-shadow: ${t.shadow} !important;
                         }
-                        /* 毛玻璃只给局部浮层本体(弹窗/抽屉)。子元素零 backdrop-filter:
-                           每加一个就是多一个合成层 + 一次对背景的高斯模糊。
+                        /* 毛玻璃只给局部浮层本�?弹窗/抽屉)。子元素�?backdrop-filter:
+                           每加一个就是多一个合成层 + 一次对背景的高斯模糊�?
                            ⚠️ 全屏容器(shell/.acu-dialog-layer/.acu-v2-drawer-layer/
-                           .acu-v2-app__mobile-nav-layer 都是 fixed inset:0 覆盖整个视口的
-                           遮罩层)绝不能加 backdrop-filter——整屏每帧 GPU 高斯模糊是卡顿源
+                           .acu-v2-app__mobile-nav-layer 都是 fixed inset:0 覆盖整个视口�?
+                           遮罩�?绝不能加 backdrop-filter——整屏每�?GPU 高斯模糊是卡顿源
                            (用户实机多次确认,16.10.12/16.10.9 已证修复)。blur 只给浮层本体:
-                           .acu-v2-drawer 侧边抽屉、.acu-dialog 弹窗卡片。 */
+                           .acu-v2-drawer 侧边抽屉�?acu-dialog 弹窗卡片�?*/
                         #acu-app-v2 .acu-v2-drawer,
                         #acu-app-v2 .acu-dialog {
                             -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
@@ -644,7 +604,7 @@
                             -webkit-backdrop-filter: none !important;
                             backdrop-filter: none !important;
                         }
-                        /* 亮顶边(光打在材料上):所有玻璃容器——shell/侧栏/弹窗/抽屉都补,
+                        /* 亮顶�?光打在材料上):所有玻璃容器——shell/侧栏/弹窗/抽屉都补,
                            否则外壳看起来是「普通边框」而不是被光照亮的材料 */
                         #acu-app-v2 .acu-v2-app__shell,
                         #acu-app-v2 .acu-dialog,
@@ -655,9 +615,9 @@
                         }
                         #acu-app-v2 .acu-v2-sidebar--desktop { border-right: 1px solid rgba(255, 255, 255, 0.4) !important; }
                         #acu-app-v2 .acu-v2-app__header { border-bottom: 1px solid rgba(255, 255, 255, 0.45) !important; }
-                        /* 内层面板:比 shell 实一档但保持可见透明(0.80),让 shell 的模糊
-                           透出来形成毛玻璃感;柔和投影(0.10/y 6px)从 shell 上浮起。
-                           太实(0.85+)会退化成白卡,毛玻璃质感消失。 */
+                        /* 内层面板:�?shell 实一档但保持可见透明(0.80),�?shell 的模�?
+                           透出来形成毛玻璃�?柔和投影(0.10/y 6px)�?shell 上浮起�?
+                           太实(0.85+)会退化成白卡,毛玻璃质感消失�?*/
                         #acu-app-v2 .acu-panel,
                         #acu-app-v2 .acu-v2-app__theme-menu {
                             background: rgba(255, 255, 255, 0.8) !important;
@@ -665,13 +625,13 @@
                             backdrop-filter: none !important;
                             box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.05) !important;
                         }
-                        /* 浮层:半透明保持玻璃感(0.82,别做实色),投影更深压住遮罩 */
+                        /* 浮层:半透明保持玻璃�?0.82,别做实色),投影更深压住遮罩 */
                         #acu-app-v2 .acu-dialog,
                         #acu-app-v2 .acu-v2-drawer {
                             background: rgba(255, 255, 255, 0.82) !important;
                             box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08) !important;
                         }
-                        /* 表格:表头加极淡底与 shell 区分,行分隔线用淡灰(不再是隐形白边) */
+                        /* 表格:表头加极淡底�?shell 区分,行分隔线用淡�?不再是隐形白�? */
                         #acu-app-v2 .acu-v2-form-fill-page__table-wrap th {
                             background: rgba(0, 0, 0, 0.03) !important;
                             border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
@@ -684,11 +644,11 @@
                             background: rgba(255, 255, 255, 0.8) !important;
                             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07) !important;
                         }
-                        /* 弹层遮罩轻压暗 + 模糊,替掉 DB 默认纯色压暗 */
+                        /* 弹层遮罩轻压�?+ 模糊,替掉 DB 默认纯色压暗 */
                         #acu-app-v2 .acu-dialog-layer { background: rgba(0, 0, 0, 0.18) !important; }
                         #acu-app-v2 .acu-v2-drawer-layer { background: rgba(0, 0, 0, 0.14) !important; }
-                        /* 不支持 backdrop-filter:提实浅色背景保证可读(@supports 与
-                           prefers-reduced-transparency 选择器集合与主规则完全一致) */
+                        /* 不支�?backdrop-filter:提实浅色背景保证可读(@supports �?
+                           prefers-reduced-transparency 选择器集合与主规则完全一�? */
                         @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
                             #acu-app-v2 .acu-v2-app__shell,
                             #acu-app-v2 .acu-dialog-layer,
@@ -801,14 +761,6 @@
     const addStyles = () => {
         const { $ } = getCore();
         if (!$) return;
-        // M-02 非阻塞字体加载：@import 会阻塞首绘，改用 <link> 异步加载 + font-display:swap
-        if (!document.getElementById(`${SCRIPT_ID}-font-link`)) {
-            const lk = document.createElement('link');
-            lk.id = `${SCRIPT_ID}-font-link`;
-            lk.rel = 'stylesheet';
-            lk.href = 'https://fonts.loli.net/css2?family=Long+Cang&family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@400;700&family=Noto+Serif+SC:wght@400;700&family=ZCOOL+KuaiLe&family=Zhi+Mang+Xing&display=swap';
-            document.head.appendChild(lk);
-        }
         $(`#${SCRIPT_ID}-styles`).remove();
         let themeCss = '';
         Object.keys(THEME_VARS).forEach(k => {
@@ -818,10 +770,11 @@
 
         const styles = `
             <style id="${SCRIPT_ID}-styles">
-                /* 字体已由上方 <link> 非阻塞加载，此处不再 @import */
+                /* 国内镜像字体源，无需VPN */
+                @import url('https://fonts.loli.net/css2?family=Long+Cang&family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@400;700&family=Noto+Serif+SC:wght@400;700&family=ZCOOL+KuaiLe&family=Zhi+Mang+Xing&display=swap');
 
-                /* 选项面板容器：脱离父级（ST 消息块 .mes_block）的 flex/对齐影响，避免窄屏/平板上被右靠。
-                   注意：display 不加 !important，否则会压掉 jQuery .hide() 的内联 display:none（发送后隐藏面板）。 */
+                /* 选项面板容器：脱离父级（ST 消息�?.mes_block）的 flex/对齐影响，避免窄�?平板上被右靠�?
+                   注意：display 不加 !important，否则会压掉 jQuery .hide() 的内�?display:none（发送后隐藏面板）�?*/
                 .acu-embedded-options-container {
                     display: block;
                     flex: 0 0 auto !important;
@@ -831,7 +784,7 @@
                     margin-right: auto !important;
                     box-sizing: border-box !important;
                 }
-                /* 窄屏（≤480px 手机）才单列；iPad 竖屏（768px）保留 3 列居中，避免整行右靠 */
+                /* 窄屏（≤480px 手机）才单列；iPad 竖屏�?68px）保�?3 列居中，避免整行右靠 */
                 @media (max-width: 480px) {
                     .acu-embedded-options-container .acu-opt-btn {
                         width: 100% !important;
@@ -849,14 +802,14 @@
                     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
                     backdrop-filter: blur(20px) saturate(180%) !important;
                 }
-                /* 亮顶边（光打在材料上）：只给导航栏/数据面板加；选项容器保留自身圆角 border，
-                   不在其上加亮边，避免「方形边框罩住圆角按钮」。 */
+                /* 亮顶边（光打在材料上）：只给导航�?数据面板加；选项容器保留自身圆角 border�?
+                   不在其上加亮边，避免「方形边框罩住圆角按钮」�?*/
                 .acu-theme-apple .acu-nav-container,
                 .acu-theme-apple .acu-data-display {
                     border-top: 1px solid rgba(255, 255, 255, 0.65) !important;
                     border-left: 1px solid rgba(255, 255, 255, 0.4) !important;
                 }
-                /* 不支持 backdrop-filter 时提实背景，保证文字可读（对应 prefers-reduced-transparency 精神） */
+                /* 不支�?backdrop-filter 时提实背景，保证文字可读（对�?prefers-reduced-transparency 精神�?*/
                 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
                     .acu-theme-apple .acu-nav-container,
                     .acu-theme-apple .acu-data-display,
@@ -872,7 +825,7 @@
                         background: #ffffff !important;
                     }
                 }
-                /* prefers-reduced-transparency：降低毛玻璃透明度（材料更实） */
+                /* prefers-reduced-transparency：降低毛玻璃透明度（材料更实�?*/
                 @media (prefers-reduced-transparency: reduce) {
                     .acu-theme-apple .acu-nav-container,
                     .acu-theme-apple .acu-data-display,
@@ -884,24 +837,24 @@
                         -webkit-backdrop-filter: none !important;
                         backdrop-filter: none !important;
                     }
-                    /* 与 @supports 兜底一致并补齐：减透明时弹窗/详情卡也要提实 */
-                    .acu-edit-dialog.acu-theme-apple { background-color: #f5f5f7 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+                    /* �?@supports 兜底一致并补齐：减透明时弹�?详情卡也要提�?*/
+                    .acu-edit-dialog.acu-theme-apple { background-color: #f5f5f7 !important; }
                     .acu-edit-dialog.acu-theme-apple textarea,
                     .acu-edit-dialog.acu-theme-apple input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
                     .acu-edit-dialog.acu-theme-apple select { background-color: #ffffff !important; }
-                    .acu-quick-view-card.acu-theme-apple { background: #f5f5f7 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+                    .acu-quick-view-card.acu-theme-apple { background: #f5f5f7 !important; }
                     .acu-quick-view-card.acu-theme-apple .acu-quick-view-header { background: #ffffff !important; }
                     .acu-quick-view-card.acu-theme-apple .acu-full-item,
                     .acu-quick-view-card.acu-theme-apple .acu-grid-item { background: #ffffff !important; }
                 }
 
                 /* ── 粉白磨砂 ──
-                   材料机制与苹果主题同源（半透明底 + backdrop-filter + 亮顶边），色相挪到暖粉。
-                   白为主体：面和卡片一律高透明度白；粉只出现在边框微光、hover、激活、徽章上。 */
-                /* 毛玻璃只给外层容器。卡片不单独给 backdrop-filter：每张卡各自起一个
-                   合成层，会逐张对背景做 20px 高斯模糊，实测 20 行一页的 insert+layout
-                   从 1.5ms 涨到 10.3ms。卡片在被模糊过的容器里，靠自身半透明白底就有
-                   玻璃质感，不需要自己再模糊一遍背景。 */
+                   材料机制与苹果主题同源（半透明�?+ backdrop-filter + 亮顶边），色相挪到暖粉�?
+                   白为主体：面和卡片一律高透明度白；粉只出现在边框微光、hover、激活、徽章上�?*/
+                /* 毛玻璃只给外层容器。卡片不单独�?backdrop-filter：每张卡各自起一�?
+                   合成层，会逐张对背景做 20px 高斯模糊，实�?20 行一页的 insert+layout
+                   �?1.5ms 涨到 10.3ms。卡片在被模糊过的容器里，靠自身半透明白底就有
+                   玻璃质感，不需要自己再模糊一遍背景�?*/
                 .acu-theme-blushglass .acu-nav-container,
                 .acu-theme-blushglass .acu-data-display,
                 .acu-theme-blushglass.acu-embedded-options-container,
@@ -911,27 +864,27 @@
                     -webkit-backdrop-filter: blur(20px) saturate(170%) !important;
                     backdrop-filter: blur(20px) saturate(170%) !important;
                 }
-                /* 白与「磨砂」的平衡点：白底不透明度太低（<0.7）会被背后深色/彩色聊天背景
-                   透上来染色，整片泛褐泛绿，白就不是主体了；垫死不透明白底又会把玻璃质感
-                   彻底杀掉，背后什么都透不出来，就不叫磨砂了。这里取 0.8 上下 —— 高饱和
-                   blur 仍能把背后揉成柔光，白又足够压住色偏。不要再往任何一边推。 */
+                /* 白与「磨砂」的平衡点：白底不透明度太低（<0.7）会被背后深�?彩色聊天背景
+                   透上来染色，整片泛褐泛绿，白就不是主体了；垫死不透明白底又会把玻璃质�?
+                   彻底杀掉，背后什么都透不出来，就不叫磨砂了。这里取 0.8 上下 —�?高饱�?
+                   blur 仍能把背后揉成柔光，白又足够压住色偏。不要再往任何一边推�?*/
                 .acu-theme-blushglass.acu-embedded-options-container {
-                    /* 选项容器自身透明但带 backdrop-filter，内边距那一圈会直接透出聊天内容，
-                       和里面的面板色不接。给它同样的白底色补上。 */
+                    /* 选项容器自身透明但带 backdrop-filter，内边距那一圈会直接透出聊天内容�?
+                       和里面的面板色不接。给它同样的白底色补上�?*/
                     background: rgba(255, 252, 253, 0.8) !important;
-                    /* 容器有了可见背景就必须跟内部 .acu-option-panel 的 12px 圆角对齐，
+                    /* 容器有了可见背景就必须跟内部 .acu-option-panel �?12px 圆角对齐�?
                        否则半透明白底是尖角正方形、里面却包着圆角面板——和苹果主题当初
-                       踩的「方形边框罩圆角」是同一类错。 */
+                       踩的「方形边框罩圆角」是同一类错�?*/
                     border-radius: 12px !important;
                 }
-                /* 边框用淡粉而不是亮白：白已经是主体面色，白边压在白底上等于隐形，
-                   分界只能交给粉——正好落在「粉色点缀」的用法上。 */
+                /* 边框用淡粉而不是亮白：白已经是主体面色，白边压在白底上等于隐形�?
+                   分界只能交给粉——正好落在「粉色点缀」的用法上�?*/
                 .acu-theme-blushglass .acu-nav-container,
                 .acu-theme-blushglass .acu-data-display {
                     border: 1px solid rgba(232, 107, 154, 0.22) !important;
                     border-top-color: rgba(232, 107, 154, 0.3) !important;
                 }
-                /* 卡片：白底磨砂 + 粉边；hover 时粉再明显一档 */
+                /* 卡片：白底磨�?+ 粉边；hover 时粉再明显一�?*/
                 .acu-theme-blushglass .acu-data-card {
                     border: 1px solid rgba(232, 107, 154, 0.2) !important;
                 }
@@ -939,7 +892,7 @@
                     border-color: rgba(232, 107, 154, 0.35) !important;
                     box-shadow: 0 6px 22px rgba(209, 86, 138, 0.16) !important;
                 }
-                /* 卡片头：白磨砂上用极淡粉实线分隔，圆角对齐卡片 12px 免得四角鼓出来 */
+                /* 卡片头：白磨砂上用极淡粉实线分隔，圆角对齐卡�?12px 免得四角鼓出�?*/
                 .acu-theme-blushglass .acu-card-header {
                     background: rgba(255, 245, 249, 0.55) !important;
                     border-bottom: 1px solid rgba(232, 107, 154, 0.16) !important;
@@ -967,8 +920,8 @@
                     background: rgba(255, 252, 253, 0.75) !important;
                     -webkit-backdrop-filter: blur(24px) saturate(175%) !important;
                     backdrop-filter: blur(24px) saturate(175%) !important;
-                    /* 边框同样用淡粉：白边在白底（尤其 @supports 兜底提实成 #fffafc 之后）
-                       等于隐形，弹窗会缺上边和左边。 */
+                    /* 边框同样用淡粉：白边在白底（尤其 @supports 兜底提实�?#fffafc 之后�?
+                       等于隐形，弹窗会缺上边和左边�?*/
                     border: 1px solid rgba(232, 107, 154, 0.24) !important;
                     border-top-color: rgba(232, 107, 154, 0.3) !important;
                     color: #3d2b33 !important;
@@ -980,12 +933,12 @@
                 .acu-edit-overlay.acu-theme-blushglass,
                 .acu-quick-view-overlay.acu-theme-blushglass {
                     background: rgba(120, 60, 85, 0.26) !important;
-                    /* 遮罩层(fixed 全屏)不 blur——全屏每帧高斯模糊是卡顿源(性能审查第4轮 explore-57),
+                    /* 遮罩�?fixed 全屏)�?blur——全屏每帧高斯模糊是卡顿�?性能审查�?�?explore-57),
                        毛玻璃由弹窗卡片本体 blur 承担 */
                     -webkit-backdrop-filter: none !important;
                     backdrop-filter: none !important;
                 }
-                /* 不支持 backdrop-filter 时提实背景（偏白，粉只留边），保证文字可读 */
+                /* 不支�?backdrop-filter 时提实背景（偏白，粉只留边），保证文字可�?*/
                 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
                     .acu-theme-blushglass .acu-nav-container,
                     .acu-theme-blushglass .acu-data-display,
@@ -1002,9 +955,9 @@
                     .acu-edit-dialog.acu-theme-blushglass,
                     .acu-quick-view-card.acu-theme-blushglass { background: #fffafc !important; }
                 }
-                /* prefers-reduced-transparency：材料提实。
-                   选择器集合要和上面 @supports 的一致——只提实外层容器、里面的卡片和弹窗
-                   仍是半透明的话，用户明确要求的「减少透明」只被兑现了一半。 */
+                /* prefers-reduced-transparency：材料提实�?
+                   选择器集合要和上�?@supports 的一致——只提实外层容器、里面的卡片和弹�?
+                   仍是半透明的话，用户明确要求的「减少透明」只被兑现了一半�?*/
                 @media (prefers-reduced-transparency: reduce) {
                     .acu-theme-blushglass .acu-nav-container,
                     .acu-theme-blushglass .acu-data-display,
@@ -1030,7 +983,7 @@
                     }
                 }
 
-                /* ── 香薰衣草(薰碧绮紫)── 磨砂弹窗/详情弹窗:白紫磨砂 + 淡紫边,
+                /* ── 香薰衣草(薰碧绮紫)── 磨砂弹窗/详情弹窗:白紫磨砂 + 淡紫�?
                    遮罩层不 blur(全屏每帧高斯模糊是卡顿源),毛玻璃由弹窗卡片本体 blur 承担 */
                 .acu-edit-dialog.acu-theme-lavender,
                 .acu-quick-view-card.acu-theme-lavender {
@@ -1051,7 +1004,7 @@
                     -webkit-backdrop-filter: none !important;
                     backdrop-filter: none !important;
                 }
-                /* 不支持 backdrop-filter 时提实背景,保证文字可读 */
+                /* 不支�?backdrop-filter 时提实背�?保证文字可读 */
                 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
                     .acu-edit-dialog.acu-theme-lavender,
                     .acu-quick-view-card.acu-theme-lavender { background: #FBF8FF !important; }
@@ -1066,20 +1019,20 @@
                 }
 
                 /* ── 克劳德风（Anthropic 设计系统）──
-                   官方规范的三条硬性特征，靠 THEME_VARS 的色值给不到，必须在这里补：
+                   官方规范的三条硬性特征，�?THEME_VARS 的色值给不到，必须在这里补：
                    1) 以边框代阴影（design-rules.md「工具优先模式」：卡片无阴影，用边框替代）
                    2) 固定圆角刻度 --radius-sm 4px / md 8px / lg 16px，不用别处的 12px
-                   3) 缓动统一 cubic-bezier(0.16, 1, 0.3, 1)，时长 150/250ms
-                   不引入外部字体：仓库自带 woff2 无法随扩展分发，按「形散神不散」原则
-                   用系统里已有的衬线/无衬线栈保住「温暖有机 + 克制现代」的气质。 */
+                   3) 缓动统一 cubic-bezier(0.16, 1, 0.3, 1)，时�?150/250ms
+                   不引入外部字体：仓库自带 woff2 无法随扩展分发，按「形散神不散」原�?
+                   用系统里已有的衬�?无衬线栈保住「温暖有�?+ 克制现代」的气质�?*/
                 .acu-theme-claude {
                     --acu-claude-ease: cubic-bezier(0.16, 1, 0.3, 1);
                 }
-                /* 卡片/面板：边框优先，阴影几乎不可见（只留一层极淡的分层感）。
+                /* 卡片/面板：边框优先，阴影几乎不可见（只留一层极淡的分层感）�?
                    .acu-quick-view-card 的主题类挂在自身而非祖先，写成后代选择器永不命中，
-                   所以放到下面和圆角规则一起用 .acu-quick-view-card.acu-theme-claude 写。
-                   导航栏排除胶囊折叠态：那条规则的 border-radius:50px 没带 !important，
-                   会被这里压成 8px，胶囊就变成小方块了。 */
+                   所以放到下面和圆角规则一起用 .acu-quick-view-card.acu-theme-claude 写�?
+                   导航栏排除胶囊折叠态：那条规则�?border-radius:50px 没带 !important�?
+                   会被这里压成 8px，胶囊就变成小方块了�?*/
                 .acu-theme-claude .acu-data-card,
                 .acu-theme-claude .acu-dash-card,
                 .acu-theme-claude .acu-nav-container:not(.acu-collapse-pill),
@@ -1097,12 +1050,12 @@
                     box-shadow: none !important;
                     border: 1px solid var(--acu-border) !important;
                 }
-                /* hover 才给阴影（design-rules.md 上下文 Token 表：默认模式 hover 时显示） */
+                /* hover 才给阴影（design-rules.md 上下�?Token 表：默认模式 hover 时显示） */
                 .acu-theme-claude .acu-data-card:hover {
                     box-shadow: 0 2px 8px rgba(20, 20, 19, 0.06) !important;
                     border-color: #9B9890 !important;
                 }
-                /* 按钮：小圆角 + 官方缓动；强调按钮用暖橙，不用渐变 */
+                /* 按钮：小圆角 + 官方缓动；强调按钮用暖橙，不用渐�?*/
                 .acu-theme-claude .acu-nav-btn,
                 .acu-theme-claude .acu-action-btn,
                 .acu-theme-claude .acu-opt-btn,
@@ -1116,15 +1069,15 @@
                                 border-color var(--acu-claude-ease) 150ms,
                                 color var(--acu-claude-ease) 150ms !important;
                 }
-                /* 表格：官方 Table 组件是 subtle 分隔线 + raised 底 hover，没有斑马纹。
-                   .acu-grid-item 也要一起软化，否则网格格子的边比相邻行明显硬一档。 */
+                /* 表格：官�?Table 组件�?subtle 分隔�?+ raised �?hover，没有斑马纹�?
+                   .acu-grid-item 也要一起软化，否则网格格子的边比相邻行明显硬一档�?*/
                 .acu-theme-claude .acu-full-item,
                 .acu-theme-claude .acu-inline-item,
                 .acu-theme-claude .acu-grid-item {
                     border-color: #E8E6DC !important;
                 }
-                /* 面板头/脚的圆角也要跟着卡片对齐到 8px，否则 12px 的头压在 8px 的面板里，
-                   顶部两角会露出一线 #ECE9E0 的色差（和上面 .acu-card-header 同类问题）。 */
+                /* 面板�?脚的圆角也要跟着卡片对齐�?8px，否�?12px 的头压在 8px 的面板里�?
+                   顶部两角会露出一�?#ECE9E0 的色差（和上�?.acu-card-header 同类问题）�?*/
                 .acu-theme-claude .acu-panel-header {
                     border-radius: 8px 8px 0 0 !important;
                 }
@@ -1136,22 +1089,22 @@
                     border-color: #D97757 !important;
                     background: rgba(217, 119, 87, 0.08) !important;
                 }
-                /* 选项按钮装的是整句中文，官方 typography-cn 要求中文行高 1.7–1.8、
-                   正文字号下限 15px；再按 space-3/space-4 给足内距，免得长句挤成两行还贴边。
-                   列数是用户设置项（--acu-opt-btn-w），不在主题里改；这里只把断行方式从
-                   break-word 换成 normal，避免「回春/丹」这种末行只剩一个字的孤字。 */
+                /* 选项按钮装的是整句中文，官方 typography-cn 要求中文行高 1.7�?.8�?
+                   正文字号下限 15px；再�?space-3/space-4 给足内距，免得长句挤成两行还贴边�?
+                   列数是用户设置项�?-acu-opt-btn-w），不在主题里改；这里只把断行方式从
+                   break-word 换成 normal，避免「回�?丹」这种末行只剩一个字的孤字�?*/
                 .acu-theme-claude .acu-opt-btn {
                     padding: 12px 16px !important;
                     line-height: 1.75 !important;
                     min-height: 44px !important;
                     word-break: normal !important;
-                    /* 必须是 anywhere 不能是 break-word：break-word 不参与 min-content 计算，
-                       flex 项的自动最小尺寸仍按整串不可断的宽度算，配上 .acu-opt-btn 自带的
-                       overflow:hidden 会把超出部分静默裁掉（实测长 URL 287px 挤进 179px）。
-                       anywhere 会缩 min-content，长串正常折行，中文不产生孤字的收益也保留。 */
+                    /* 必须�?anywhere 不能�?break-word：break-word 不参�?min-content 计算�?
+                       flex 项的自动最小尺寸仍按整串不可断的宽度算，配�?.acu-opt-btn 自带�?
+                       overflow:hidden 会把超出部分静默裁掉（实测长 URL 287px 挤进 179px）�?
+                       anywhere 会缩 min-content，长串正常折行，中文不产生孤字的收益也保留�?*/
                     overflow-wrap: anywhere !important;
                 }
-                /* 弹窗：官方 Modal 用 bg-overlay 纸白 + lg 圆角 */
+                /* 弹窗：官�?Modal �?bg-overlay 纸白 + lg 圆角 */
                 .acu-theme-claude.acu-edit-dialog,
                 .acu-theme-claude .acu-edit-dialog {
                     border-radius: 16px !important;
@@ -1161,15 +1114,15 @@
                 .acu-quick-view-card.acu-theme-claude {
                     border-radius: 16px !important;
                 }
-                /* 卡片头：基础样式写死 12px 圆角和 dashed 边，与本主题 8px 圆角 + 实线分隔冲突。
-                   dashed 用的是 --acu-border，但本主题 --acu-title-color 是近黑，视觉上过硬，
-                   这里统一压成 subtle 实线，并把圆角对齐卡片的 8px 免得头部四角鼓出来。 */
+                /* 卡片头：基础样式写死 12px 圆角�?dashed 边，与本主题 8px 圆角 + 实线分隔冲突�?
+                   dashed 用的�?--acu-border，但本主�?--acu-title-color 是近黑，视觉上过硬，
+                   这里统一压成 subtle 实线，并把圆角对齐卡片的 8px 免得头部四角鼓出来�?*/
                 .acu-theme-claude .acu-card-header {
                     border-radius: 8px 8px 0 0 !important;
                     border-bottom: 1px solid #E8E6DC !important;
                 }
                 /* 标题用衬线体呼应官方 Lora/DM Serif 的「温暖有机」气质，
-                   正文保持无衬线以便扫读（工具优先模式的原话：衬线体不利于快速浏览）。 */
+                   正文保持无衬线以便扫读（工具优先模式的原话：衬线体不利于快速浏览）�?*/
                 .acu-theme-claude .acu-panel-title,
                 .acu-theme-claude .acu-quick-view-header,
                 .acu-theme-claude .acu-editable-title,
@@ -1177,7 +1130,7 @@
                     font-family: 'Noto Serif SC', 'Source Han Serif SC', 'Noto Serif CJK SC', 'Songti SC', 'STSong', Georgia, serif !important;
                     letter-spacing: 0.01em;
                 }
-                /* 中文排版：官方 typography-cn 要求正文行高 1.7–1.8（1.55 对中文偏紧） */
+                /* 中文排版：官�?typography-cn 要求正文行高 1.7�?.8�?.55 对中文偏紧） */
                 .acu-theme-claude .acu-full-value,
                 .acu-theme-claude .acu-inline-value,
                 .acu-theme-claude .acu-grid-value {
@@ -1365,7 +1318,7 @@
                 .acu-inline-item:last-child { border-bottom: none; }
                 .acu-inline-item:hover { background: var(--acu-table-hover); }
                 .acu-inline-label { display: inline; color: var(--acu-title-color); font-weight: bold; font-size: var(--acu-font-size, 13px); line-height: 1.4; margin-right: 4px; }
-                .acu-inline-label::after { content: '：'; }
+                .acu-inline-label::after { content: '�?; }
                 .acu-inline-value { display: inline; color: var(--acu-text-main); font-size: var(--acu-font-size, 13px); line-height: 1.4; word-break: break-word; white-space: pre-wrap; }
                 .acu-inline-value.acu-highlight-changed { display: inline; }
 
@@ -1427,18 +1380,18 @@
                 .acu-cell-menu-item#act-insert { color: #2980b9; }
                 .acu-wrapper button:focus, .acu-edit-dialog button:focus, .acu-cell-menu button:focus { outline: none !important; }
                 
-                /* 历史遗留的无条件 blur 覆盖已移除(16.10.16 卡顿修复):nav-container blur(16px)
-                   与基础规则 blur(5px)重复且更重;data-display 展开时近全屏(95vh),blur(20px)
-                   saturate(180%) = 整屏每帧高斯模糊(卡顿源)。毛玻璃只给局部小面积容器。 */
+                /* 历史遗留的无条件 blur 覆盖已移�?16.10.16 卡顿修复):nav-container blur(16px)
+                   与基础规则 blur(5px)重复且更�?data-display 展开时近全屏(95vh),blur(20px)
+                   saturate(180%) = 整屏每帧高斯模糊(卡顿�?。毛玻璃只给局部小面积容器�?*/
                 
                 .acu-theme-aurora .acu-data-card::before, .acu-theme-sunset .acu-data-card::before, .acu-theme-starship .acu-data-card::before, .acu-theme-sky .acu-data-card::before {
                     content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
                     background: linear-gradient(135deg, var(--acu-highlight), var(--acu-text-sub));
                     border-radius: inherit; z-index: -1; opacity: 0; transition: opacity 0.3s ease;
                 }
-                /* 性能审查 P3-1:blur 只在 hover 时应用——常驻 blur(8px) 会让浏览器为每张卡片
-                   维护一个合成层(即使 opacity:0 不绘制),一页 20 卡 = 20 个 blur 层;移入 hover
-                   后非 hover 卡片不建层,零风险纯 CSS 优化 */
+                /* 性能审查 P3-1:blur 只在 hover 时应用——常�?blur(8px) 会让浏览器为每张卡片
+                   维护一个合成层(即使 opacity:0 不绘�?,一�?20 �?= 20 �?blur �?移入 hover
+                   后非 hover 卡片不建�?零风险纯 CSS 优化 */
                 .acu-theme-aurora .acu-data-card:hover::before, .acu-theme-sunset .acu-data-card:hover::before, .acu-theme-starship .acu-data-card:hover::before, .acu-theme-sky .acu-data-card:hover::before { opacity: 0.3; filter: blur(8px); }
                 
                 @media (max-width: 768px) {
@@ -1484,8 +1437,8 @@
                 .acu-edit-dialog.acu-theme-sky { background-color: #f0f9ff !important; }
                 .acu-edit-dialog.acu-theme-sky textarea, .acu-edit-dialog.acu-theme-sky input:not([type="checkbox"]):not([type="radio"]):not([type="color"]) { background-color: #ffffff !important; border-color: #bae6fd !important; }
                 
-                /* 苹果主题设置弹窗：毛玻璃材料化——半透明白背景 + blur，替代默认纯色面板。
-                   内联样式 background-color !important 优先级高，此处同样 !important 覆盖。 */
+                /* 苹果主题设置弹窗：毛玻璃材料化——半透明白背�?+ blur，替代默认纯色面板�?
+                   内联样式 background-color !important 优先级高，此处同�?!important 覆盖�?*/
                 .acu-edit-dialog.acu-theme-apple {
                     background-color: rgba(250, 250, 252, 0.55) !important;
                     -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
@@ -1503,18 +1456,18 @@
                 .acu-edit-dialog.acu-theme-apple .acu-section-header {
                     border-bottom: 1px solid rgba(0, 0, 0, 0.06) !important;
                 }
-                /* 苹果主题 overlay（JS 已给 overlay 加 acu-theme-apple 类）：更轻压暗 + 更强模糊，
-                   让弹窗毛玻璃背景透出聊天内容而非黑幕。 */
+                /* 苹果主题 overlay（JS 已给 overlay �?acu-theme-apple 类）：更轻压�?+ 更强模糊�?
+                   让弹窗毛玻璃背景透出聊天内容而非黑幕�?*/
                 .acu-edit-overlay.acu-theme-apple {
                     background: rgba(0, 0, 0, 0.28) !important;
-                    /* 遮罩层(fixed 全屏)不 blur——全屏每帧高斯模糊是卡顿源(explore-57),毛玻璃由卡片本体 blur 承担 */
+                    /* 遮罩�?fixed 全屏)�?blur——全屏每帧高斯模糊是卡顿�?explore-57),毛玻璃由卡片本体 blur 承担 */
                     -webkit-backdrop-filter: none !important;
                     backdrop-filter: none !important;
                 }
-                /* 苹果主题详情弹窗（点单元格/卡片弹出的快速查看）：
-                   默认只有 background: var(--acu-card-bg)，苹果主题下那是 rgba(255,255,255,0.6)——
-                   半透明白底却没有 backdrop-filter，深色文字直接压在聊天内容上，几乎读不了。
-                   这里补上与设置弹窗一致的毛玻璃材料 + 提高底色不透明度保证对比度。 */
+                /* 苹果主题详情弹窗（点单元�?卡片弹出的快速查看）�?
+                   默认只有 background: var(--acu-card-bg)，苹果主题下那是 rgba(255,255,255,0.6)—�?
+                   半透明白底却没�?backdrop-filter，深色文字直接压在聊天内容上，几乎读不了�?
+                   这里补上与设置弹窗一致的毛玻璃材�?+ 提高底色不透明度保证对比度�?*/
                 .acu-quick-view-card.acu-theme-apple {
                     background: rgba(250, 250, 252, 0.72) !important;
                     -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
@@ -1523,7 +1476,7 @@
                     border-left: 1px solid rgba(255, 255, 255, 0.45) !important;
                     color: #1d1d1f !important;
                 }
-                /* 表头/正文分区在毛玻璃上要用极浅的实色分隔，避免叠加透明层糊成一片 */
+                /* 表头/正文分区在毛玻璃上要用极浅的实色分隔，避免叠加透明层糊成一�?*/
                 .acu-quick-view-card.acu-theme-apple .acu-quick-view-header {
                     background: rgba(255, 255, 255, 0.5) !important;
                     border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
@@ -1537,9 +1490,9 @@
                 .acu-quick-view-card.acu-theme-apple .acu-grid-item:hover {
                     background: rgba(0, 122, 255, 0.08) !important;
                 }
-                /* 列表布局（savedStyles 缺省即 'list'，是最常见的布局）用 .acu-inline-item，
-                   其分隔线是 1px dashed var(--acu-border)——苹果主题下那是 rgba(255,255,255,0.5)，
-                   压在浅色毛玻璃上等于看不见。这里换成极浅实色，保证行与行分得开。 */
+                /* 列表布局（savedStyles 缺省�?'list'，是最常见的布局）用 .acu-inline-item�?
+                   其分隔线�?1px dashed var(--acu-border)——苹果主题下那是 rgba(255,255,255,0.5)�?
+                   压在浅色毛玻璃上等于看不见。这里换成极浅实色，保证行与行分得开�?*/
                 .acu-quick-view-card.acu-theme-apple .acu-inline-item {
                     border-bottom-color: rgba(0, 0, 0, 0.08) !important;
                 }
@@ -1556,20 +1509,20 @@
                 .acu-quick-view-card.acu-theme-apple .acu-grid-label {
                     color: #6e6e73 !important;
                 }
-                /* 苹果主题详情弹窗 overlay：轻压暗 + 模糊，和设置弹窗一致 */
+                /* 苹果主题详情弹窗 overlay：轻压暗 + 模糊，和设置弹窗一�?*/
                 .acu-quick-view-overlay.acu-theme-apple {
                     background: rgba(0, 0, 0, 0.28) !important;
-                    /* 遮罩层(fixed 全屏)不 blur——全屏每帧高斯模糊是卡顿源(explore-57),毛玻璃由卡片本体 blur 承担 */
+                    /* 遮罩�?fixed 全屏)�?blur——全屏每帧高斯模糊是卡顿�?explore-57),毛玻璃由卡片本体 blur 承担 */
                     -webkit-backdrop-filter: none !important;
                     backdrop-filter: none !important;
                 }
-                /* 不支持 backdrop-filter 时设置弹窗/详情弹窗都提实背景 */
+                /* 不支�?backdrop-filter 时设置弹�?详情弹窗都提实背�?*/
                 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-                    .acu-edit-dialog.acu-theme-apple { background-color: #f5f5f7 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+                    .acu-edit-dialog.acu-theme-apple { background-color: #f5f5f7 !important; }
                     .acu-edit-dialog.acu-theme-apple textarea,
                     .acu-edit-dialog.acu-theme-apple input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
                     .acu-edit-dialog.acu-theme-apple select { background-color: #ffffff !important; }
-                    .acu-quick-view-card.acu-theme-apple { background: #f5f5f7 !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important; }
+                    .acu-quick-view-card.acu-theme-apple { background: #f5f5f7 !important; }
                     .acu-quick-view-card.acu-theme-apple .acu-quick-view-header { background: #ffffff !important; }
                     .acu-quick-view-card.acu-theme-apple .acu-full-item,
                     .acu-quick-view-card.acu-theme-apple .acu-grid-item { background: #ffffff !important; }
@@ -1598,9 +1551,9 @@
         $('head').append(styles);
     };
 
-    // 轻量指纹：每表行数 + 步长采样（前 20 行内隔行取）+ 末行全列。
+    // 轻量指纹：每表行�?+ 步长采样（前 20 行内隔行取）+ 末行全列�?
     // 追平/填表主要写最新楼层（末行），也可能改更早楼层（中间行）；步长采样覆盖中间行变更，
-    // 又避免对整份数据 JSON.stringify（大表/高楼层开销大）。顶层定义，供两个轮询共享。
+    // 又避免对整份数据 JSON.stringify（大�?高楼层开销大）。顶层定义，供两个轮询共享�?
     const lightFingerprint = (data) => {
         if (!data || typeof data !== 'object') return '';
         try {
@@ -1610,20 +1563,24 @@
                 const s = data[k];
                 if (!s || !Array.isArray(s.content) || s.content.length === 0) { out += k + ':0;'; continue; }
                 out += k + ':' + s.content.length + ';';
-                // N-02 列采样一致性：与 sheetFingerprints 统一全列采样，消除宽表第7+列盲区（开销+30%可接受）
+                // 隔行采样�?20 行（步长 2）每行前 6 列，再加末行�?6 列�?
+                // 行数变化已由长度部分捕获�?
+                const ROWS_SCAN = 20, COLS_SCAN = 6;
                 const n = s.content.length;
-                const step = Math.max(1, Math.ceil(n / 40));
-                for (let r = 0; r < n; r += step) {
+                const rowLimit = Math.min(n, ROWS_SCAN);
+                for (let r = 0; r < rowLimit; r += 2) {
                     const row = s.content[r];
                     if (Array.isArray(row)) {
-                        for (let cc = 0; cc < row.length; cc++) out += (row[cc] ?? '') + '|';
+                        const cl = Math.min(row.length, COLS_SCAN);
+                        for (let cc = 0; cc < cl; cc++) out += (row[cc] ?? '') + '|';
                     }
                     out += ';';
                 }
-                // 末行全列（补最新楼层写入；若末行已被采样，此处重复但确定性一致）
+                // 末行全列（补最新楼层写入；若末行在�?20 行内已采，此处重复但确定性一致）
                 const last = s.content[n - 1];
                 if (Array.isArray(last)) {
-                    for (let cc = 0; cc < last.length; cc++) out += (last[cc] ?? '') + '|';
+                    const cl = Math.min(last.length, COLS_SCAN);
+                    for (let cc = 0; cc < cl; cc++) out += (last[cc] ?? '') + '|';
                 }
                 out += ';';
             }
@@ -1631,15 +1588,15 @@
         } catch (_) { return String(Date.now()); }
     };
 
-    // 是否处于用户编辑/弹窗上下文：排序模式、设置弹窗、单元格编辑、cell menu、快速预览任一打开即 true。
-    // 顶层定义，供 init 的填表轮询与 bindEvents 的追平轮询共用（两者是兄弟 IIFE 闭包）。
+    // 是否处于用户编辑/弹窗上下文：排序模式、设置弹窗、单元格编辑、cell menu、快速预览任一打开�?true�?
+    // 顶层定义，供 init 的填表轮询与 bindEvents 的追平轮询共用（两者是兄弟 IIFE 闭包）�?
     const inEditingContext = () => {
         const jq = getCore().$;
         return isEditingOrder || !!(jq && (jq('.acu-edit-overlay, .acu-cell-menu, .acu-quick-view-overlay').length));
     };
 
-    // 深拷贝工具：避免对外暴露数据库内部对象的引用，防止前端就地修改污染 DB 运行时状态。
-    // 高楼层大数据时 structuredClone/JSON 都可能抛错，必须有最终兜底，不能让调用方被异常打断。
+    // 深拷贝工具：避免对外暴露数据库内部对象的引用，防止前端就地修改污�?DB 运行时状态�?
+    // 高楼层大数据�?structuredClone/JSON 都可能抛错，必须有最终兜底，不能让调用方被异常打断�?
     const cloneTableData = (data) => {
         if (!data || typeof data !== 'object') return data;
         try { return structuredClone(data); }
@@ -1647,8 +1604,8 @@
             try { return JSON.parse(JSON.stringify(data)); }
             catch (e2) {
                 console.warn('[ACU-UI] cloneTableData failed, returning shallow sheet shell:', e2);
-                // 最后兜底：按 sheet 浅拷贝 content 引用，至少保证读路径可用；
-                // 写路径仍应走 API 而非就地改写。
+                // 最后兜底：�?sheet 浅拷�?content 引用，至少保证读路径可用�?
+                // 写路径仍应走 API 而非就地改写�?
                 const shell = {};
                 try {
                     for (const k of Object.keys(data)) {
@@ -1665,8 +1622,8 @@
         }
     };
 
-    // 逐表轻量指纹(性能审查 P1-1):对每个 sheet 独立算指纹,用于定位「哪几张表真的变了」,
-    // 支持只 clone 变化表、复用其余表缓存(避免填表/追平期间每 1.5-2s 全表深拷贝 8.3MB)。
+    // 逐表轻量指纹(性能审查 P1-1):对每�?sheet 独立算指�?用于定位「哪几张表真的变了�?
+    // 支持�?clone 变化表、复用其余表缓存(避免填表/追平期间�?1.5-2s 全表深拷�?8.3MB)�?
     const sheetFingerprints = (data) => {
         const out = {};
         if (!data || typeof data !== 'object') return out;
@@ -1676,10 +1633,11 @@
                 const s = data[k];
                 if (!s || !Array.isArray(s.content) || s.content.length === 0) { out[k] = k + ':0;'; continue; }
                 let fp = k + ':' + s.content.length + ';';
-                // 全列采样 + 均匀约 40 行覆盖全表(步长随行数缩放),消除中间行盲区
+                // 全列采样:列数�?diffMap 64 列上限约�?全列成本可控且避免第 7+ 列变化误判「未变�?
+                const ROWS_SCAN = 20;
                 const n = s.content.length;
-                const step = Math.max(1, Math.ceil(n / 40));
-                for (let r = 0; r < n; r += step) {
+                const rowLimit = Math.min(n, ROWS_SCAN);
+                for (let r = 0; r < rowLimit; r += 2) {
                     const row = s.content[r];
                     if (Array.isArray(row)) {
                         for (let cc = 0; cc < row.length; cc++) fp += (row[cc] ?? '') + '|';
@@ -1697,9 +1655,9 @@
         } catch (_) { return out; }
     };
 
-    // 按表克隆(性能审查 P1-1):对比新旧逐表指纹,只深拷贝变化的 sheet,其余 sheet 复用旧缓存引用。
-    // 保持「克隆副本」不变式(读/写路径依赖非 DB 引用副本),但粒度从全表降到单表——
-    // 填表/追平期间通常只有 1-2 张表在变,其余表(如 8.3MB 里的历史大表)不再每次深拷贝。
+    // 按表克隆(性能审查 P1-1):对比新旧逐表指纹,只深拷贝变化�?sheet,其余 sheet 复用旧缓存引用�?
+    // 保持「克隆副本」不变式(�?写路径依赖非 DB 引用副本),但粒度从全表降到单表—�?
+    // 填表/追平期间通常只有 1-2 张表在变,其余�?�?8.3MB 里的历史大表)不再每次深拷贝�?
     const cloneTableDataPartial = (raw, oldCached) => {
         if (!raw || typeof raw !== 'object') return raw;
         const cloneOne = (v) => { try { return structuredClone(v); } catch (_) { try { return JSON.parse(JSON.stringify(v)); } catch (__) { return v; } } };
@@ -1707,9 +1665,9 @@
             const newFp = sheetFingerprints(raw);
             const oldFp = sheetFingerprints(oldCached);
             const sheets = Object.keys(raw).filter(k => k.startsWith('sheet_'));
-            // 表集合差检测(第二轮审查 P1-1-B):raw 与 oldCached 的 sheet key 列表不等
-            // (增表/删表) → 指纹循环不覆盖「oldFp 有而 newFp 无」的表,直接全量克隆,
-            // 避免被删表残留在缓存中继续渲染。
+            // 表集合差检�?第二轮审�?P1-1-B):raw �?oldCached �?sheet key 列表不等
+            // (增表/删表) �?指纹循环不覆盖「oldFp 有�?newFp 无」的�?直接全量克隆,
+            // 避免被删表残留在缓存中继续渲染�?
             if (oldCached && typeof oldCached === 'object') {
                 const oldSheets = Object.keys(oldCached).filter(k => k.startsWith('sheet_')).sort();
                 const newSheets = sheets.slice().sort();
@@ -1719,32 +1677,32 @@
             }
             let anyChanged = false;
             for (const k of sheets) { if (newFp[k] !== oldFp[k]) { anyChanged = true; break; } }
-            if (!anyChanged && oldCached) return oldCached; // 指纹全同 = 数据未动,直接复用旧缓存
+            if (!anyChanged && oldCached) return oldCached; // 指纹全同 = 数据未动,直接复用旧缓�?
             const out = {};
             for (const k of Object.keys(raw)) {
-                if (!k.startsWith('sheet_')) { out[k] = cloneOne(raw[k]); continue; } // 非 sheet 元数据克隆
+                if (!k.startsWith('sheet_')) { out[k] = cloneOne(raw[k]); continue; } // �?sheet 元数据克�?
                 if (!oldCached || newFp[k] !== oldFp[k]) {
-                    out[k] = cloneOne(raw[k]); // 变化表(或无旧缓存):克隆新副本
+                    out[k] = cloneOne(raw[k]); // 变化�?或无旧缓�?:克隆新副�?
                 } else {
-                    out[k] = oldCached[k]; // 未变化表:复用旧缓存引用(读路径只读,安全)
+                    out[k] = oldCached[k]; // 未变化表:复用旧缓存引�?读路径只�?安全)
                 }
             }
             return out;
-        } catch (_) { return cloneTableData(raw); } // 兜底:异常时退回全量克隆
+        } catch (_) { return cloneTableData(raw); } // 兜底:异常时退回全量克�?
     };
 
-    // 缓存数据来源的原始引用：exportTableAsJson 返回 DB 内部 currentJsonTableData_ACU，
-    // DB 在数据合并时以不可变式替换整个对象（_set_currentJsonTableData_ACU 换新引用）。
-    // 引用相同 = 数据未变 → forceRefresh 时可跳过深拷贝直接复用缓存，避免高频全表 clone。
-    // ⚠ 已知例外（交叉验证确认）：DB 的 SqlTableService._ensureTablesFromTemplate 在 SQLite
-    // 缺表建表时会原地往活对象加 sheet key（引用不变但表集合变），故引用未变时仍须比对表集合。
+    // 缓存数据来源的原始引用：exportTableAsJson 返回 DB 内部 currentJsonTableData_ACU�?
+    // DB 在数据合并时以不可变式替换整个对象（_set_currentJsonTableData_ACU 换新引用）�?
+    // 引用相同 = 数据未变 �?forceRefresh 时可跳过深拷贝直接复用缓存，避免高频全表 clone�?
+    // �?已知例外（交叉验证确认）：DB �?SqlTableService._ensureTablesFromTemplate �?SQLite
+    // 缺表建表时会原地往活对象加 sheet key（引用不变但表集合变），故引用未变时仍须比对表集合�?
     let lastRawTableRef = null;
-    // 标记最近一次 getTableData 是否产生了新数据（引用变化 → 需要重算 diffMap）
+    // 标记最近一�?getTableData 是否产生了新数据（引用变�?�?需要重�?diffMap�?
     let lastTableDataRefreshed = false;
-    // 上次缓存的表集合指纹（sheet key 名 + 数量），用于捕获"引用不变但新增/删除了表"的建表场景
+    // 上次缓存的表集合指纹（sheet key �?+ 数量），用于捕获"引用不变但新�?删除了表"的建表场�?
     let lastTableSetFingerprint = '';
 
-    // 轻量表集合指纹：只列 sheet key 名与数量，成本极低
+    // 轻量表集合指纹：只列 sheet key 名与数量，成本极�?
     const tableSetFingerprint = (raw) => {
         if (!raw || typeof raw !== 'object') return '';
         const keys = Object.keys(raw).filter(k => k.startsWith('sheet_')).sort();
@@ -1759,10 +1717,10 @@
         try {
             const api = getCore().getDB();
             const raw = api && api.exportTableAsJson ? api.exportTableAsJson() : null;
-            // 引用未变时仍比对表集合：DB 建表场景会原地加 sheet key（引用不变但表集合变）
+            // 引用未变时仍比对表集合：DB 建表场景会原地加 sheet key（引用不变但表集合变�?
             const setFp = tableSetFingerprint(raw);
             const setChanged = setFp !== lastTableSetFingerprint;
-            // 引用未变 + 表集合未变 + 已有缓存 → 数据确实没动，复用缓存跳过 clone
+            // 引用未变 + 表集合未�?+ 已有缓存 �?数据确实没动，复用缓存跳�?clone
             if (forceRefresh && raw === lastRawTableRef && !setChanged && cachedTableData) {
                 lastTableDataRefreshed = false;
                 return cachedTableData;
@@ -1771,13 +1729,13 @@
             lastTableSetFingerprint = setFp;
             lastTableDataRefreshed = true;
             // 关键：exportTableAsJson 返回的是 DB 内部 currentJsonTableData_ACU 的直接引用，
-            // 必须深拷贝后再对外返回，否则前端的就地修改会绕过 DB 的事务/校验逻辑。
-            // 性能审查 P1-1：按表克隆——只深拷贝指纹变化的 sheet，其余 sheet 复用旧缓存，
-            // 填表/追平期间避免每 1.5-2s 全表 8.3MB 深拷贝。
+            // 必须深拷贝后再对外返回，否则前端的就地修改会绕过 DB 的事�?校验逻辑�?
+            // 性能审查 P1-1：按表克隆——只深拷贝指纹变化的 sheet，其�?sheet 复用旧缓存，
+            // 填表/追平期间避免�?1.5-2s 全表 8.3MB 深拷贝�?
             const data = cloneTableDataPartial(raw, cachedTableData);
             if (data) {
-                // R-2:仅当产生新对象(数据真正变化/表集合差全量)时递增 dataVersion;
-                // 指纹全同复用旧缓存时 data===cachedTableData,不递增,避免搜索缓存无谓失效。
+                // R-2:仅当产生新对�?数据真正变化/表集合差全量)时递增 dataVersion;
+                // 指纹全同复用旧缓存时 data===cachedTableData,不递增,避免搜索缓存无谓失效�?
                 if (data !== cachedTableData) dataVersion++;
                 cachedTableData = data;
             }
@@ -1789,11 +1747,11 @@
         }
     };
 
-    // 从数据模型读回某个单元格的原文。
-    // 取代表格单元格上一度内嵌的 data-val 属性（已因体积暴涨被移除）：
-    // 页面上的 cell 带 data-key/data-row/data-col，row 是 0 起的数据行索引，
+    // 从数据模型读回某个单元格的原文�?
+    // 取代表格单元格上一度内嵌的 data-val 属性（已因体积暴涨被移除）�?
+    // 页面上的 cell �?data-key/data-row/data-col，row �?0 起的数据行索引，
     // 对应 content[rowIdx + 1]（content[0] 是表头）。读不到时退回可见文本，
-    // 保证 showCellMenu 至少有个可编辑的起手内容，不至于空白。
+    // 保证 showCellMenu 至少有个可编辑的起手内容，不至于空白�?
     const readCellValue = (cell, rowIdx, colIdx, tableKey) => {
         try {
             const data = getTableData(false) || cachedTableData;
@@ -1805,7 +1763,7 @@
                     return String(row[colIdx]);
                 }
             }
-        } catch (_) { /* 走可见文本兜底 */ }
+        } catch (_) { /* 走可见文本兜�?*/ }
         // 兜底：从单元格可见内容反取（先精确子元素，再退到整体文本）
         try {
             const $c = $(cell);
@@ -1881,7 +1839,7 @@
 
             cachedTableData = null;
             if (!skipRender) {
-                if (window.toastr) window.toastr.success('保存成功！');
+                if (window.toastr) window.toastr.success('保存成功�?);
                 $('.acu-highlight-changed').removeClass('acu-highlight-changed');
                 currentDiffMap.clear();
                 saveSnapshot(tableData);
@@ -1907,7 +1865,7 @@
             for (const sheetId in json) {
                 const sheet = json[sheetId];
                 if (!sheet || typeof sheet !== 'object' || !sheet.name) continue;
-                // content 可能缺失/非数组（脏数据、半残快照）；一律兜底为空表，避免上层 throw
+                // content 可能缺失/非数组（脏数据、半残快照）；一律兜底为空表，避免上�?throw
                 const content = Array.isArray(sheet.content) ? sheet.content : [];
                 const headers = Array.isArray(content[0]) ? content[0] : [];
                 const rows = content.length > 1 ? content.slice(1) : [];
@@ -1916,14 +1874,14 @@
         } catch (e) {
             console.warn('[ACU-UI] processJsonData partial failure:', e);
         }
-        // 始终返回对象，调用方无需再判 null（旧实现返回 null 会让 Object.keys 直接抛错）
+        // 始终返回对象，调用方无需再判 null（旧实现返回 null 会让 Object.keys 直接抛错�?
         return tables;
     };
     
     const showSettingsModal = () => {
         const { $ } = getCore();
         if (!$) {
-            if (window.toastr) window.toastr.error('设置面板打开失败：jQuery 未就绪');
+            if (window.toastr) window.toastr.error('设置面板打开失败：jQuery 未就�?);
             return;
         }
         $('.acu-edit-overlay').remove();
@@ -1934,7 +1892,7 @@
             const processed = processJsonData(rawData || {});
             allTableNames = Object.keys(processed || {});
         } catch (e) {
-            console.warn('[ACU-UI] showSettingsModal: 读取表名失败，以空列表继续:', e);
+            console.warn('[ACU-UI] showSettingsModal: 读取表名失败，以空列表继�?', e);
             allTableNames = [];
         }
         const reversedTables = getReverseOrderTables();
@@ -2150,7 +2108,7 @@
                      </div>
                     <div class="acu-settings-content" style="flex: 1; overflow-y: auto; padding: 20px;">
                         
-                        <div class="acu-section-header" data-target="sec-appearance"><div class="acu-section-title"><i class="fa-solid fa-palette"></i> 主题与外观</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-appearance"><div class="acu-settings-group">
+                        <div class="acu-section-header" data-target="sec-appearance"><div class="acu-section-title"><i class="fa-solid fa-palette"></i> 主题与外�?/div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-appearance"><div class="acu-settings-group">
                             <div class="acu-control-row">
                                 <div class="acu-label-col"><span class="acu-label-main">背景主题</span></div>
                                 <div class="acu-input-col">
@@ -2160,7 +2118,7 @@
                                 </div>
                             </div>
                             <div class="acu-control-row">
-                                <div class="acu-label-col"><span class="acu-label-main">数据库UI风格</span><span class="acu-label-sub" style="font-weight:normal">数据库新UI(#acu-app-v2)的玻璃风格</span></div>
+                                <div class="acu-label-col"><span class="acu-label-main">数据库UI风格</span><span class="acu-label-sub" style="font-weight:normal">数据库新UI(#acu-app-v2)的玻璃风�?/span></div>
                                 <div class="acu-input-col">
                                     <select id="cfg-db-glass-style" class="acu-nice-select">
                                         <option value="off" ${config.dbGlassStyle === 'off' ? 'selected' : ''}>关闭(默认)</option>
@@ -2170,7 +2128,7 @@
                                 </div>
                             </div>
                             <div class="acu-control-row" id="row-db-accent" style="display:${config.dbGlassStyle === 'apple' ? 'flex' : 'none'}">
-                                <div class="acu-label-col"><span class="acu-label-main">数据库UI主色调</span><span class="acu-label-sub" style="font-weight:normal">苹果风格的强调色</span></div>
+                                <div class="acu-label-col"><span class="acu-label-main">数据库UI主色�?/span><span class="acu-label-sub" style="font-weight:normal">苹果风格的强调色</span></div>
                                 <div class="acu-input-col">
                                     <select id="cfg-db-accent" class="acu-nice-select">
                                         ${Object.entries(DB_ACCENTS).map(([k, a]) => `<option value="${k}" ${(config.dbAccent || 'blue') === k ? 'selected' : ''}>${a.name}</option>`).join('')}
@@ -2222,7 +2180,7 @@
                                       <div class="acu-color-row" id="cfg-color-opts" style="justify-content: flex-start; align-items: center;">
                                         ${Object.keys(HIGHLIGHT_COLORS).map(k => `<div class="acu-color-circle ${config.highlightColor === k ? 'selected' : ''}" data-val="${k}" data-type="highlight" title="${HIGHLIGHT_COLORS[k].name}" style="background-color:${HIGHLIGHT_COLORS[k].main}"></div>`).join('')}
                                       <div style="width:1px;height:20px;background:var(--acu-border);margin:0 8px;"></div>
-                                      <div class="acu-custom-color-btn ${(config.highlightColor && !HIGHLIGHT_COLORS[config.highlightColor] && String(config.highlightColor).startsWith('#')) ? 'selected' : ''}" title="自定义颜色">
+                                      <div class="acu-custom-color-btn ${(config.highlightColor && !HIGHLIGHT_COLORS[config.highlightColor] && String(config.highlightColor).startsWith('#')) ? 'selected' : ''}" title="自定义颜�?>
                                           <div class="acu-custom-bg" style="background:${(config.highlightColor && !HIGHLIGHT_COLORS[config.highlightColor] && String(config.highlightColor).startsWith('#')) ? config.highlightColor : 'conic-gradient(red, orange, yellow, green, blue, indigo, violet, red)'}"></div>
                                           <input type="color" id="cfg-highlight-custom" value="${(config.highlightColor && String(config.highlightColor).startsWith('#')) ? config.highlightColor : '#d35400'}">
                                       </div>
@@ -2230,7 +2188,7 @@
                                 </div>
                             </div><div class="acu-nav-separator"></div><div class="acu-control-row" style="${config.customTitleColor ? 'border-bottom:none; padding-bottom:5px' : ''}">
                                 <div class="acu-label-col">
-                                    <span class="acu-label-main">标题颜色自定义 <span id="hint-title" style="font-size:11px;color:var(--acu-text-sub);font-weight:normal;margin-left:5px;display:${config.customTitleColor ? 'inline' : 'none'}">下方选择标题颜色</span></span>
+                                    <span class="acu-label-main">标题颜色自定�?<span id="hint-title" style="font-size:11px;color:var(--acu-text-sub);font-weight:normal;margin-left:5px;display:${config.customTitleColor ? 'inline' : 'none'}">下方选择标题颜色</span></span>
                                 </div>
                                 <div class="acu-input-col">
                                     <label class="acu-switch">
@@ -2243,21 +2201,21 @@
                                       <div class="acu-color-row" id="cfg-title-color-opts" style="justify-content: flex-start; align-items: center;">
                                         ${Object.keys(HIGHLIGHT_COLORS).map(k => `<div class="acu-color-circle ${config.titleColor === k ? 'selected' : ''}" data-val="${k}" data-type="title" title="${HIGHLIGHT_COLORS[k].name}" style="background-color:${HIGHLIGHT_COLORS[k].main}"></div>`).join('')}
                                       <div style="width:1px;height:20px;background:var(--acu-border);margin:0 8px;"></div>
-                                      <div class="acu-custom-color-btn ${(config.titleColor && !HIGHLIGHT_COLORS[config.titleColor] && String(config.titleColor).startsWith('#')) ? 'selected' : ''}" title="自定义颜色">
+                                      <div class="acu-custom-color-btn ${(config.titleColor && !HIGHLIGHT_COLORS[config.titleColor] && String(config.titleColor).startsWith('#')) ? 'selected' : ''}" title="自定义颜�?>
                                           <div class="acu-custom-bg" style="background:${(config.titleColor && !HIGHLIGHT_COLORS[config.titleColor] && String(config.titleColor).startsWith('#')) ? config.titleColor : 'conic-gradient(red, orange, yellow, green, blue, indigo, violet, red)'}"></div>
                                           <input type="color" id="cfg-title-custom" value="${(config.titleColor && String(config.titleColor).startsWith('#')) ? config.titleColor : '#d35400'}">
                                       </div>
                                       </div>
                                 </div>
                             </div><div class="acu-control-row">
-                                <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">长文本折叠</span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">限制卡片内文本高度</span></div>
+                                <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">长文本折�?/span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">限制卡片内文本高�?/span></div>
                                 <div class="acu-input-col">
                                     <label class="acu-switch">
                                         <input type="checkbox" id="cfg-limit-height" ${config.limitLongText !== false ? 'checked' : ''}>
                                         <span class="acu-slider-switch"></span>
                                     </label>
                                 </div>
-                            </div></div></div><div class="acu-section-header" data-target="sec-layout"><div class="acu-section-title"><i class="fa-solid fa-layer-group"></i> 布局与样式</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-layout"><div class="acu-settings-group"><div class="acu-control-row">
+                            </div></div></div><div class="acu-section-header" data-target="sec-layout"><div class="acu-section-title"><i class="fa-solid fa-layer-group"></i> 布局与样�?/div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-layout"><div class="acu-settings-group"><div class="acu-control-row">
                                 <div class="acu-label-col"><span class="acu-label-main">页面布局</span></div>
                                 <div class="acu-input-col">
                                     <select id="cfg-layout" class="acu-nice-select">
@@ -2269,7 +2227,7 @@
                                 <div class="acu-label-col"><span class="acu-label-main">前端位置</span></div>
                                 <div class="acu-input-col">
                                     <select id="cfg-frontend-pos" class="acu-nice-select">
-                                        <option value="bottom" ${config.frontendPosition === 'bottom' ? 'selected' : ''}>上下文底部</option>
+                                        <option value="bottom" ${config.frontendPosition === 'bottom' ? 'selected' : ''}>上下文底�?/option>
                                         <option value="message" ${config.frontendPosition === 'message' ? 'selected' : ''}>最新消息内</option>
                                     </select>
                                 </div>
@@ -2278,9 +2236,9 @@
                                  <div class="acu-input-col">
                                      <select id="cfg-grid-cols" class="acu-nice-select">
                                         <option value="0" ${!config.gridColumns ? 'selected' : ''}>自动</option>
-                                        <option value="2" ${config.gridColumns == 2 ? 'selected' : ''}>2 列</option>
-                                        <option value="3" ${config.gridColumns == 3 ? 'selected' : ''}>3 列</option>
-                                        <option value="4" ${config.gridColumns == 4 ? 'selected' : ''}>4 列</option>
+                                        <option value="2" ${config.gridColumns == 2 ? 'selected' : ''}>2 �?/option>
+                                        <option value="3" ${config.gridColumns == 3 ? 'selected' : ''}>3 �?/option>
+                                        <option value="4" ${config.gridColumns == 4 ? 'selected' : ''}>4 �?/option>
                                     </select>
                                 </div>
                             </div><div class="acu-control-row">
@@ -2297,7 +2255,7 @@
                                     </select>
                                 </div>
                             </div><div class="acu-control-row">
-                                <div class="acu-label-col"><span class="acu-label-main">每页卡片数</span></div>
+                                <div class="acu-label-col"><span class="acu-label-main">每页卡片�?/span></div>
                                 <div class="acu-input-col">
                                     <div class="acu-stepper">
                                         <button class="acu-step-btn minus" data-key="itemsPerPage" data-step="5" data-min="5" data-max="100"><i class="fa-solid fa-minus"></i></button>
@@ -2305,9 +2263,9 @@
                                         <button class="acu-step-btn plus" data-key="itemsPerPage" data-step="5" data-min="5" data-max="100"><i class="fa-solid fa-plus"></i></button>
                                     </div>
                                 </div>
-                            </div></div></div><div class="acu-section-header" data-target="sec-actions"><div class="acu-section-title"><i class="fa-solid fa-list-check"></i> 选项面板 ${!allTableNames.some(n => n.includes('选项')) ? '<span class="acu-section-desc" style="color:#e74c3c !important;">未检测到选项表</span>' : ''}</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-actions"><div class="acu-settings-group">
+                            </div></div></div><div class="acu-section-header" data-target="sec-actions"><div class="acu-section-title"><i class="fa-solid fa-list-check"></i> 选项面板 ${!allTableNames.some(n => n.includes('选项')) ? '<span class="acu-section-desc" style="color:#e74c3c !important;">未检测到选项�?/span>' : ''}</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-actions"><div class="acu-settings-group">
 <div class="acu-control-row" >
-                                <div class="acu-label-col"><span class="acu-label-main">选项面板开关</span></div>
+                                <div class="acu-label-col"><span class="acu-label-main">选项面板开�?/span></div>
                                 <div class="acu-input-col">
                                     <label class="acu-switch">
                                         <input type="checkbox" id="cfg-show-option" ${config.showOptionPanel !== false ? 'checked' : ''}>
@@ -2316,7 +2274,7 @@
                                 </div>
                             </div>
 <div class="acu-control-row" id="row-auto-send" >
-                                <div class="acu-label-col"><span class="acu-label-main">点击选项直接发送</span></div>
+                                <div class="acu-label-col"><span class="acu-label-main">点击选项直接发�?/span></div>
                                 <div class="acu-input-col">
                                     <label class="acu-switch">
                                         <input type="checkbox" id="cfg-auto-send" ${config.clickOptionToAutoSend ? 'checked' : ''}>
@@ -2335,9 +2293,9 @@
                                     </div>
                                 </div>
                             </div>
-</div></div><div class="acu-section-header" data-target="sec-dashboard"><div class="acu-section-title"><i class="fa-solid fa-tachometer-alt"></i> 仪表盘</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-dashboard"><div class="acu-settings-group">
+</div></div><div class="acu-section-header" data-target="sec-dashboard"><div class="acu-section-title"><i class="fa-solid fa-tachometer-alt"></i> 仪表�?/div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-dashboard"><div class="acu-settings-group">
 <div class="acu-control-row" >
-                                <div class="acu-label-col"><span class="acu-label-main">仪表盘开关</span></div>
+                                <div class="acu-label-col"><span class="acu-label-main">仪表盘开�?/span></div>
                                 <div class="acu-input-col">
                                     <label class="acu-switch">
                                         <input type="checkbox" id="cfg-show-dash" ${config.showDashboard !== false ? 'checked' : ''}>
@@ -2346,16 +2304,16 @@
                                 </div>
                             </div>
 <div class="acu-control-row" id="row-dash-pos" >
-                                <div class="acu-label-col"><span class="acu-label-main">仪表盘位置</span></div>
+                                <div class="acu-label-col"><span class="acu-label-main">仪表盘位�?/span></div>
                                 <div class="acu-input-col">
                                     <select id="cfg-dash-pos" class="acu-nice-select">
                                         <option value="embedded" ${config.dashboardPosition === 'embedded' ? 'selected' : ''}>最新消息内</option>
-                                        <option value="panel" ${config.dashboardPosition === 'panel' ? 'selected' : ''}>导航悬浮窗</option>
+                                        <option value="panel" ${config.dashboardPosition === 'panel' ? 'selected' : ''}>导航悬浮�?/option>
                                     </select>
                                 </div>
                             </div>
                             <div class="acu-control-row">
-                                <div class="acu-label-col"><span class="acu-label-main">仪表盘字体大小</span></div>
+                                <div class="acu-label-col"><span class="acu-label-main">仪表盘字体大�?/span></div>
                                 <div class="acu-input-col">
                                     <div class="acu-stepper">
                                         <button class="acu-step-btn minus" data-key="dashboardFontSize" data-step="1" data-min="10" data-max="20"><i class="fa-solid fa-minus"></i></button>
@@ -2389,7 +2347,7 @@ ${allTableNames.map(tName => {
 
                         <div class="acu-section-header" data-target="sec-debug"><div class="acu-section-title"><i class="fa-solid fa-bug"></i> 调试</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-debug"><div class="acu-settings-group">
                             <div class="acu-control-row">
-                                <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">调试模式</span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">采集错误/长任务,用于复现卡顿等问题</span></div>
+                                <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">调试模式</span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">采集错误/长任�?用于复现卡顿等问�?/span></div>
                                 <div class="acu-input-col">
                                     <label class="acu-switch">
                                         <input type="checkbox" id="cfg-debug-mode" ${config.debugMode ? 'checked' : ''}>
@@ -2398,7 +2356,7 @@ ${allTableNames.map(tName => {
                                 </div>
                             </div>
                             <div class="acu-control-row">
-                                <div class="acu-label-col"><span class="acu-label-main">调试报告</span><span class="acu-label-sub" style="font-weight:normal">开启调试模式→复现问题→生成报告,自动打开 GitHub 预填 issue 页提交</span></div>
+                                <div class="acu-label-col"><span class="acu-label-main">调试报告</span><span class="acu-label-sub" style="font-weight:normal">开启调试模式→复现问题→生成报�?自动打开 GitHub 预填 issue 页提�?/span></div>
                                 <div class="acu-input-col" style="justify-content:flex-end; gap:8px">
                                     <button class="acu-btn-block" id="btn-gen-debug-report" style="margin:0; padding:8px 14px; width:auto;">生成报告</button>
                                     <a href="https://github.com/shuiyue-cmyk/st-acu-visualizer" target="_blank" rel="noopener noreferrer" class="acu-btn-block" style="margin:0; padding:8px 14px; width:auto; text-decoration:none; display:inline-flex; align-items:center; gap:6px;"><i class="fa-solid fa-star"></i> 给项目点个星</a>
@@ -2406,7 +2364,7 @@ ${allTableNames.map(tName => {
                             </div>
                             <div class="acu-control-row" style="display:none;" id="row-debug-result">
                                 <div class="acu-input-col" style="width:100%;">
-                                    <a id="debug-issue-link" href="#" target="_blank" rel="noopener noreferrer" style="color:var(--acu-highlight); word-break:break-all; font-size:12px;">打开 GitHub issue 提交页</a>
+                                    <a id="debug-issue-link" href="#" target="_blank" rel="noopener noreferrer" style="color:var(--acu-highlight); word-break:break-all; font-size:12px;">打开 GitHub issue 提交�?/a>
                                 </div>
                             </div>
                         </div></div>
@@ -2559,7 +2517,7 @@ ${allTableNames.map(tName => {
         dialog.find('#cfg-db-glass-style').on('change', function() {
             const val = $(this).val();
             saveConfig({ dbGlassStyle: val });
-            // 主色调行仅苹果风格显示(联动显隐)
+            // 主色调行仅苹果风格显�?联动显隐)
             dialog.find('#row-db-accent').css('display', val === 'apple' ? 'flex' : 'none');
         });
 
@@ -2570,9 +2528,9 @@ ${allTableNames.map(tName => {
         });
         dialog.find('#btn-gen-debug-report').on('click', function() {
             const wasOn = getConfig().debugMode;
-            if (!wasOn) debugHook(); // 开关未开:临时挂载采集一次
+            if (!wasOn) debugHook(); // 开关未开:临时挂载采集一�?
             const url = genDebugIssueUrl();
-            if (!wasOn) debugUnhook(); // 临时挂载用后即卸,不残留
+            if (!wasOn) debugUnhook(); // 临时挂载用后即卸,不残�?
             const $link = dialog.find('#debug-issue-link');
             $link.attr('href', url).text(url.slice(0, 100) + '...');
             dialog.find('#row-debug-result').css('display', 'flex');
@@ -2621,8 +2579,8 @@ ${allTableNames.map(tName => {
             return;
         }
 
-        // 共享选择器（倒序找 + offsetParent 判隐藏），替掉原来那份 per-message
-        // getComputedStyle + 子树查询的内嵌 getTargetContainer
+        // 共享选择器（倒序�?+ offsetParent 判隐藏），替掉原来那�?per-message
+        // getComputedStyle + 子树查询的内�?getTargetContainer
         const $target = getEmbeddedTargetBlock();
         if ($target && $target.length) {
             const $existing = $('.acu-embedded-dashboard-container');
@@ -2638,13 +2596,13 @@ ${allTableNames.map(tName => {
                 // 原地更新，避免滚动条跳动
                 const $container = $('.acu-embedded-dashboard-container');
                 $container.removeClass().addClass(`acu-embedded-dashboard-container ${themeClass}`);
-                // 保留基本样式并更新变量
+                // 保留基本样式并更新变�?
                 $container.attr('style', 'margin-top: 6px; width: 100%; clear: both; ' + cssVars);
 
                 const $wrapper = $container.find('.acu-dash-content-wrapper');
                 $wrapper.html(htmlContent);
 
-                // 处理编辑模式下的状态同步
+                // 处理编辑模式下的状态同�?
                 const $editBtn = $container.find('#acu-btn-dash-edit-emb');
                 const $editIcon = $editBtn.find('i');
                 const $header = $container.find('.acu-dash-ctrl-bar');
@@ -2659,7 +2617,7 @@ ${allTableNames.map(tName => {
                     $editIcon.removeClass('fa-edit').addClass('fa-check').css('color', 'var(--acu-highlight)');
                 } else {
                     $editIcon.removeClass('fa-check').addClass('fa-edit').css('color', '');
-                    // 非编辑模式下，根据折叠状态显示/隐藏编辑按钮
+                    // 非编辑模式下，根据折叠状态显�?隐藏编辑按钮
                     if ($wrapper.css('height') === '0px' || $wrapper.css('opacity') === '0') {
                         $editBtn.hide();
                     } else {
@@ -2667,7 +2625,7 @@ ${allTableNames.map(tName => {
                     }
                 }
             } else {
-                // 首次创建或位置变更
+                // 首次创建或位置变�?
                 let isCollapsed = true; 
                 if (isDashEditing) isCollapsed = false;
 
@@ -2691,7 +2649,7 @@ ${allTableNames.map(tName => {
                     ">
                         <div style="display:flex; align-items:center; gap:8px;">
                              <i class="fa-solid fa-tachometer-alt" style="color:var(--acu-highlight);"></i>
-                             <span style="font-weight: bold; color: var(--acu-title-color); font-size: 13px;">仪表盘</span>
+                             <span style="font-weight: bold; color: var(--acu-title-color); font-size: 13px;">仪表�?/span>
                         </div>
                         <div style="display:flex; align-items:center; gap:8px;">
                             <button id="acu-btn-dash-edit-emb" title="编辑布局" style="background:transparent; border:none; color:var(--acu-text-sub); cursor:pointer; padding:0 4px; height:16px; display:${isCollapsed ? 'none' : 'inline-flex'}; align-items:center;"><i class="fa-solid ${isDashEditing ? 'fa-check' : 'fa-edit'}" style="${isDashEditing ? 'color:var(--acu-highlight)' : ''}"></i></button>
@@ -2742,7 +2700,7 @@ ${allTableNames.map(tName => {
                 const $opts = $target.find('.acu-embedded-options-container');
                 if ($opts.length) { $opts.before($container); } else { $target.append($container); }
             }
-            // 新建/原地更新后都要对齐正文列，否则容器保持 width:100% 会比 wrapper 宽
+            // 新建/原地更新后都要对齐正文列，否则容器保�?width:100% 会比 wrapper �?
             alignWrapperToMessageColumn();
         } else {
             $('.acu-embedded-dashboard-container').remove();
@@ -2757,7 +2715,7 @@ ${allTableNames.map(tName => {
             return;
         }
 
-        // 共享选择器，同 injectEmbeddedDashboard
+        // 共享选择器，�?injectEmbeddedDashboard
         const $target = getEmbeddedTargetBlock();
         if ($target && $target.length) {
             const $existing = $('.acu-embedded-options-container');
@@ -2844,7 +2802,7 @@ ${allTableNames.map(tName => {
 
                 $target.append($container);
             }
-            // 新建/原地更新后都要对齐正文列，否则容器保持 width:100% 会比 wrapper 宽
+            // 新建/原地更新后都要对齐正文列，否则容器保�?width:100% 会比 wrapper �?
             alignWrapperToMessageColumn();
         } else {
              $('.acu-embedded-options-container').remove();
@@ -2869,11 +2827,11 @@ ${allTableNames.map(tName => {
                  Object.keys(allTables).forEach(k => {
                      const sheet = allTables[k];
                      // 选项表识别收紧：
-                     // 路径1 - 表名含'选项'（强信号）；
-                     // 路径2 - uid 为 sheet_OptionsNew（默认选项表）；
-                     // 路径3 - 形态特征：除 row_id 之外的列名都以'选项'开头。
-                     //   这是选项表的本质特征（选项一/二/…/N），既能兼容扩列，
-                     //   又能排除只是某列偶然含'选项'字样的其他表（上轮过宽识别的根因）。
+                     // 路径1 - 表名�?选项'（强信号）；
+                     // 路径2 - uid �?sheet_OptionsNew（默认选项表）�?
+                     // 路径3 - 形态特征：�?row_id 之外的列名都�?选项'开头�?
+                     //   这是选项表的本质特征（选项一/�?�?N），既能兼容扩列�?
+                     //   又能排除只是某列偶然�?选项'字样的其他表（上轮过宽识别的根因）�?
                      const headersNoId = Array.isArray(sheet?.headers)
                          ? sheet.headers.filter(h => h && String(h).toLowerCase() !== 'row_id')
                          : [];
@@ -2892,9 +2850,9 @@ ${allTableNames.map(tName => {
                  });
             }
 
-            // 优化D：diffMap 惰性重算——只有数据真正刷新（引用变化走深拷贝）才重算，
-            // 纯 UI 态变化（切 tab/折叠/设置调整 renderInterface(false)）复用现有 diffMap，
-            // 避免每次渲染都 O(rows×cols) 全表比对。
+            // 优化D：diffMap 惰性重算——只有数据真正刷新（引用变化走深拷贝）才重算�?
+            // �?UI 态变化（�?tab/折叠/设置调整 renderInterface(false)）复用现�?diffMap�?
+            // 避免每次渲染�?O(rows×cols) 全表比对�?
             if (lastTableDataRefreshed) {
                 currentDiffMap = generateDiffMap(rawData);
             }
@@ -2942,8 +2900,8 @@ ${allTableNames.map(tName => {
             const isAlreadyVisible = $('#acu-data-area').hasClass('visible');
 
             const actionBtns = {
-                'acu-btn-open-db': `<button class="acu-action-btn" id="acu-btn-open-db" title="打开数据库工作台（基础/高手模式）"><i class="fa-solid fa-database"></i></button>`,
-                'acu-btn-open-visualizer': `<button class="acu-action-btn" id="acu-btn-open-visualizer" title="打开表格编辑器"><i class="fa-solid fa-table-cells"></i></button>`,
+                'acu-btn-open-db': `<button class="acu-action-btn" id="acu-btn-open-db" title="打开数据库工作台（基础/高手模式�?><i class="fa-solid fa-database"></i></button>`,
+                'acu-btn-open-visualizer': `<button class="acu-action-btn" id="acu-btn-open-visualizer" title="打开表格编辑�?><i class="fa-solid fa-table-cells"></i></button>`,
                 'acu-btn-manual-update': `<button class="acu-action-btn" id="acu-btn-manual-update" title="立即手动更新"><i class="fa-solid fa-bolt"></i></button>`,
                 'acu-btn-settings': `<button class="acu-action-btn" id="acu-btn-settings" title="全能设置"><i class="fa-solid fa-cog"></i></button>`,
                 'acu-btn-toggle': `<button class="acu-action-btn" id="acu-btn-toggle" title="${isCollapsed ? '展开' : '收起'}"><i class="fa-solid ${isCollapsed ? 'fa-chevron-up' : 'fa-chevron-down'}"></i></button>`
@@ -2967,17 +2925,17 @@ ${allTableNames.map(tName => {
                 contentHtml = renderTableContent(tables[currentTabName], currentTabName);
             }
 
-            // 选项表变化检测：用轻量采样指纹替代全量投影拼接(性能审查 P3-3)。
-            // 全量 join(';') 在几百行选项表下每 render ~1ms;改为「行数 + 前 8 行每行前 8 列 + 末行」
-            // 采样,检测增删行/前部/末部变化仍准,成本降一个量级。
+            // 选项表变化检测：用轻量采样指纹替代全量投影拼�?性能审查 P3-3)�?
+            // 全量 join(';') 在几百行选项表下�?render ~1ms;改为「行�?+ �?8 行每行前 8 �?+ 末行�?
+            // 采样,检测增删行/前部/末部变化仍准,成本降一个量级�?
             const optionStr = optionTables.map(ot => {
                 const hdrArr = Array.isArray(ot?.headers) ? ot.headers : [];
                 const h = hdrArr.join(',');
                 const rowsArr = Array.isArray(ot?.rows) ? ot.rows : [];
                 const n = rowsArr.length;
-                // 采样覆盖:前 20 行全采 + 末行,列取全列。相比旧版全量投影,只牺牲
-                // 「第 21+ 行(非末行)」的变化检测——选项表行数中低,前 20 行+末行覆盖绝大多数;
-                // 增删行/前部/末部/任意列内容变化仍可靠捕获(探针实测)。
+                // 采样覆盖:�?20 行全�?+ 末行,列取全列。相比旧版全量投�?只牺�?
+                // 「第 21+ �?非末�?」的变化检测——选项表行数中�?�?20 �?末行覆盖绝大多数;
+                // 增删�?前部/末部/任意列内容变化仍可靠捕获(探针实测)�?
                 const SAMPLE_ROWS = 20;
                 const sampleRow = (r) => {
                     const row = rowsArr[r];
@@ -2988,9 +2946,9 @@ ${allTableNames.map(tName => {
                     return s;
                 };
                 let rs = n + ':';
-                const rowLimit = Math.min(n, SAMPLE_ROWS + 1); // +1 覆盖索引 20(前 21 行全采)
+                const rowLimit = Math.min(n, SAMPLE_ROWS + 1); // +1 覆盖索引 20(�?21 行全�?
                 for (let r = 0; r < rowLimit; r++) rs += sampleRow(r) + ';';
-                if (n > rowLimit) rs += sampleRow(n - 1) + ';'; // 末行补最新写入
+                if (n > rowLimit) rs += sampleRow(n - 1) + ';'; // 末行补最新写�?
                 return h + '@' + rs;
             }).join('~');
             if (optionStr !== lastOptionDataCheck) {
@@ -3002,18 +2960,18 @@ ${allTableNames.map(tName => {
             let optBtnCount = 0; if (optionTables.length > 0 && !hideOptionsUntilUpdate) {
                 let buttonsHtml = '';
                 let hasBtns = false;
-                // 选项按钮封顶(性能审查第4轮 explore-56/57):大选项表每行每列都生成按钮,
-                // 无界增长会灌爆折叠容器+每次render全量重建(仿仪表盘 CAPSULE_RENDER_CAP=60),
-                // 超出部分用提示条引导去表格页。
+                // 选项按钮封顶(性能审查�?�?explore-56/57):大选项表每行每列都生成按钮,
+                // 无界增长会灌爆折叠容�?每次render全量重建(仿仪表盘 CAPSULE_RENDER_CAP=60),
+                // 超出部分用提示条引导去表格页�?
                 const OPT_BTN_CAP = 60;
                 let optShown = 0, optSkipped = 0;
                 optionTables.forEach(table => {
                     if(table.rows && Array.isArray(table.headers)) {
-                         // 关键修复：按 headers 的列数遍历，而不是按 row 的实际长度。
-                         // 当用户在 DB 里把选项表从 4 列扩到 6/8 列后，row 数组往往没自动补齐新列，
-                         // 旧的 row.forEach 遍历不到新增列下标，新增选项永远不显示。
-                         // 这里按 headers 长度迭代并对 row[idx] 缺值做空字符串兜底，
-                         // 同时用 encodeURIComponent 安全转义，空按钮跳过不生成（避免出现空格占位）。
+                         // 关键修复：按 headers 的列数遍历，而不是按 row 的实际长度�?
+                         // 当用户在 DB 里把选项表从 4 列扩�?6/8 列后，row 数组往往没自动补齐新列，
+                         // 旧的 row.forEach 遍历不到新增列下标，新增选项永远不显示�?
+                         // 这里�?headers 长度迭代并对 row[idx] 缺值做空字符串兜底�?
+                         // 同时�?encodeURIComponent 安全转义，空按钮跳过不生成（避免出现空格占位）�?
                          const colCount = table.headers.length;
                          table.rows.forEach(row => {
                               for (let idx = 1; idx < colCount; idx++) {
@@ -3028,7 +2986,7 @@ ${allTableNames.map(tName => {
                     }
                 });
                 if (optSkipped > 0) {
-                    buttonsHtml += `<div style="padding:8px 10px; color:var(--acu-text-sub); font-size:11px; text-align:center;">仅显示前 ${OPT_BTN_CAP} 个选项，另有 ${optSkipped} 个请到表格页查看</div>`;
+                    buttonsHtml += `<div style="padding:8px 10px; color:var(--acu-text-sub); font-size:11px; text-align:center;">仅显示前 ${OPT_BTN_CAP} 个选项，另�?${optSkipped} 个请到表格页查看</div>`;
                 }
                 if (hasBtns) {
                     optionBtnContent = buttonsHtml;
@@ -3036,13 +2994,13 @@ ${allTableNames.map(tName => {
             }
 
 
-            // ≤4：每行排满；>4：每行最多 3，flex 居中（末行也居中）
+            // �?：每行排满；>4：每行最�?3，flex 居中（末行也居中�?
             let optMaxPerRow = 3;
             if (optBtnCount > 0) {
                  if (optBtnCount <= 4) optMaxPerRow = optBtnCount;
                  else optMaxPerRow = 3;
             }
-            // 按钮宽度 = (100% - gap*(n-1)) / n；gap 与 CSS 中 8px 对齐
+            // 按钮宽度 = (100% - gap*(n-1)) / n；gap �?CSS �?8px 对齐
             const optGapPx = 8;
             const optBtnW = optMaxPerRow <= 1
                 ? '100%'
@@ -3057,7 +3015,7 @@ ${allTableNames.map(tName => {
                     <div class="acu-nav-container ${isCollapsed ? 'collapsed' : ''} ${isEditingOrder ? 'editing-order' : ''} acu-collapse-${collapseStyle} acu-pill-${collapsePos}" id="acu-nav-bar">
                         ${orderControlsHtml}
                         <div class="acu-nav-tabs-area">
-                            ${(showDash && config.dashboardPosition === 'panel') ? `<button class="acu-nav-btn ${currentTabName === TAB_DASHBOARD ? 'active' : ''}" data-table="${TAB_DASHBOARD}"><i class="fa-solid fa-tachometer-alt"></i><span>仪表盘</span></button>` : ''}
+                            ${(showDash && config.dashboardPosition === 'panel') ? `<button class="acu-nav-btn ${currentTabName === TAB_DASHBOARD ? 'active' : ''}" data-table="${TAB_DASHBOARD}"><i class="fa-solid fa-tachometer-alt"></i><span>仪表�?/span></button>` : ''}
             `;
             orderedNames.forEach(name => {
                 if (hiddenTables.includes(name)) return;
@@ -3124,7 +3082,7 @@ ${allTableNames.map(tName => {
             { id: 'slot_3_1', kw: '全局数据', rule: 'kv' },
             { id: 'slot_4_1', kw: '重要角色', rule: 'capsule', col: 1 },
             { id: 'slot_5_1', kw: '背包', rule: 'capsule', col: 1 },
-            { id: 'slot_5_2', kw: '技能', rule: 'capsule', col: 1 },
+            { id: 'slot_5_2', kw: '技�?, rule: 'capsule', col: 1 },
             { id: 'slot_6_1', kw: '任务', rule: 'capsule', col: 1, capCols: 2 },
             { id: 'slot_6_2', kw: '地点', rule: 'capsule', col: 1, capCols: 2 }
         ];
@@ -3133,7 +3091,7 @@ ${allTableNames.map(tName => {
                 const k = findKey(s.kw);
                 if (k && tables[k]) {
                     const t = tables[k];
-                    const entry = { isEmpty: false, title: (k.endsWith('表') ? k.slice(0, -1) : k), text: k, rule: s.rule };
+                    const entry = { isEmpty: false, title: (k.endsWith('�?) ? k.slice(0, -1) : k), text: k, rule: s.rule };
                     let valid = false;
                     if (s.rule === 'kv') {
                         if (t.rows && t.rows.length) { entry.card = t.rows[0][1]; }
@@ -3157,7 +3115,7 @@ ${allTableNames.map(tName => {
             const table = key ? tables[key] : null;
 
             if (!table || !table.rows || table.rows.length === 0) {
-                return `<div style="padding:15px; color:var(--acu-text-sub); font-size:12px; text-align:center;">未找到表格: ${escapeHtml(keyword)}</div>`;
+                return `<div style="padding:15px; color:var(--acu-text-sub); font-size:12px; text-align:center;">未找到表�? ${escapeHtml(keyword)}</div>`;
             }
 
             const headers = table.headers || [];
@@ -3175,7 +3133,7 @@ ${allTableNames.map(tName => {
                 if (idx === 0) return; 
                 if (colsToShow && !colsToShow.includes(idx)) return;
 
-                const label = headers[idx] || `列${idx}`;
+                const label = headers[idx] || `�?{idx}`;
                 if (cell !== undefined && cell !== null && String(cell).trim() !== '') {
                     itemsHtml += `
                         <div class="acu-dash-stat-row" style="display:flex; justify-content:flex-start; align-items:center; padding:8px 10px; background:var(--acu-btn-bg); border-radius:8px; border:1px solid transparent; width:100%; box-sizing:border-box;">
@@ -3196,7 +3154,7 @@ ${allTableNames.map(tName => {
             const table = key ? tables[key] : null;
 
             if (!table || !table.rows || table.rows.length === 0) {
-                 return `<div style="padding:15px; color:var(--acu-text-sub); font-size:12px; text-align:center;">未找到表格: ${escapeHtml(keyword)}</div>`;
+                 return `<div style="padding:15px; color:var(--acu-text-sub); font-size:12px; text-align:center;">未找到表�? ${escapeHtml(keyword)}</div>`;
             }
 
             const targetColIdx = (cfg.capCol !== undefined && cfg.capCol !== null) ? parseInt(cfg.capCol) : 1;
@@ -3213,10 +3171,10 @@ ${allTableNames.map(tName => {
                 iconHtml = `<i class="fa-solid ${iconClass}" style="margin-right:6px; opacity:0.7; font-size:0.9em;"></i>`;
             }
 
-            // 胶囊槽位不分页会成为最大的渲染成本：任务/地点这类表会无界增长，
-            // 实测 500 行 × 5 个默认槽位 = 929KB HTML，而嵌入式仪表盘创建时恒为
-            // 折叠态（height:0/opacity:0），这些 DOM 用户根本看不到却每次渲染都重建。
-            // 这里封顶：只渲染前 CAPSULE_RENDER_CAP 条，超出用一个提示条代替。
+            // 胶囊槽位不分页会成为最大的渲染成本：任�?地点这类表会无界增长�?
+            // 实测 500 �?× 5 个默认槽�?= 929KB HTML，而嵌入式仪表盘创建时恒为
+            // 折叠态（height:0/opacity:0），这些 DOM 用户根本看不到却每次渲染都重建�?
+            // 这里封顶：只渲染�?CAPSULE_RENDER_CAP 条，超出用一个提示条代替�?
             const CAPSULE_RENDER_CAP = 60;
             let itemsHtml = '';
             let shown = 0, skipped = 0;
@@ -3254,7 +3212,7 @@ ${allTableNames.map(tName => {
 
         const getSlotTitle = (slotId) => {
             const cfg = getSlotCfg(slotId);
-            return cfg.isEmpty ? '未配置' : cfg.title;
+            return cfg.isEmpty ? '未配�? : cfg.title;
         };
 
         const renderSlotWrapper = (slotId, contentHtml) => {
@@ -3270,7 +3228,7 @@ ${allTableNames.map(tName => {
              return `
                 <div class="acu-dash-card" style="position:relative; width:100%; box-sizing:border-box; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
                     ${editBtn}
-                    <div class="acu-dash-title">${escapeHtml(cfg.title || '未命名')}</div>
+                    <div class="acu-dash-title">${cfg.title || '未命�?}</div>
                     ${contentHtml}
                 </div>
              `;
@@ -3292,7 +3250,7 @@ ${allTableNames.map(tName => {
                 const active = i === 0 ? 'active' : '';
                 const title = getSlotTitle(sid);
                 const tabId = `${groupId}-${sid}`;
-                header += `<div class="acu-tab-btn ${active}" data-target="${tabId}">${escapeHtml(title)} ${getTabEditBtn(sid)}</div>`;
+                header += `<div class="acu-tab-btn ${active}" data-target="${tabId}">${title} ${getTabEditBtn(sid)}</div>`;
                 body += `<div id="${tabId}" class="acu-tab-pane ${active}">${renderSlotContent(sid)}</div>`;
             });
             header += '</div>';
@@ -3345,12 +3303,12 @@ ${allTableNames.map(tName => {
         const html = `
             <div class="acu-panel-header">
                 <div class="acu-panel-title">
-                    <i class="fa-solid fa-tachometer-alt"></i> 仪表盘
+                    <i class="fa-solid fa-tachometer-alt"></i> 仪表�?
                     ${isDashEditing ? '<span style="font-size:12px; margin-left:10px; color:var(--acu-highlight); background:var(--acu-highlight-bg); padding:2px 8px; border-radius:4px;">编辑模式</span>' : ''}
                 </div>
                 <div class="acu-header-actions">
                     <div class="acu-header-btn-group" style="display:flex; gap:6px; align-items:center;">
-                        <button class="acu-header-btn" id="acu-btn-dash-edit" title="${isDashEditing ? '退出编辑' : '编辑仪表盘'}">
+                        <button class="acu-header-btn" id="acu-btn-dash-edit" title="${isDashEditing ? '退出编�? : '编辑仪表�?}">
                             <i class="fa-solid ${isDashEditing ? 'fa-check' : 'fa-edit'}" style="${isDashEditing ? 'color:var(--acu-highlight)' : ''}"></i>
                         </button>
                         <button class="acu-header-btn acu-height-drag-handle" data-table="acu_tab_dashboard_home" title="按住拖动调整高度">
@@ -3371,26 +3329,26 @@ ${allTableNames.map(tName => {
         return html;
     };
 
-    // 挑一条能代表正文列几何的消息来量。
+    // 挑一条能代表正文列几何的消息来量�?
     //
-    // 不能无脑取最后一条：ST 给系统小消息加 .smallSysMes，其样式把
-    // `.mes_text { padding: 0 !important }`、`.mes_block { margin-right: unset !important }`，
-    // 量到的「正文宽」等于整块宽，面板就会又宽出 30px —— 正是本次要修的溢出。
-    // 所以优先取最后一条正常消息（非系统/非小系统），没有再退回最后一条。
+    // 不能无脑取最后一条：ST 给系统小消息�?.smallSysMes，其样式�?
+    // `.mes_text { padding: 0 !important }`、`.mes_block { margin-right: unset !important }`�?
+    // 量到的「正文宽」等于整块宽，面板就会又宽出 30px —�?正是本次要修的溢出�?
+    // 所以优先取最后一条正常消息（非系�?非小系统），没有再退回最后一条�?
     const getMeasurableMes = () => {
         const { $ } = getCore();
         const $all = $('#chat .mes');
         if (!$all.length) return null;
-        // 从末尾倒着找，命中即停 —— 不要用 .filter() 扫全部消息。
-        // 原写法对每条消息调 $m.css('display')，那是 per-message getComputedStyle：
-        // 1000 层聊天实测单次 1.1ms、一次渲染 5 次扫描 5.7ms，且随聊天变长线性恶化。
-        // 倒序 + offsetParent 判隐藏不触发样式解析，实测同规模 0.01ms（快 100 倍以上）。
+        // 从末尾倒着找，命中即停 —�?不要�?.filter() 扫全部消息�?
+        // 原写法对每条消息�?$m.css('display')，那�?per-message getComputedStyle�?
+        // 1000 层聊天实测单�?1.1ms、一次渲�?5 次扫�?5.7ms，且随聊天变长线性恶化�?
+        // 倒序 + offsetParent 判隐藏不触发样式解析，实测同规模 0.01ms（快 100 倍以上）�?
         const nodes = $all.get();
         for (let i = nodes.length - 1; i >= 0; i--) {
             const el = nodes[i];
             if (el.classList.contains('smallSysMes') || el.classList.contains('sys_mes')) continue;
             if (el.getAttribute('is_system') === 'true') continue;
-            // 隐藏判定：offsetParent 为空且无 client rect（比 getComputedStyle 便宜得多）
+            // 隐藏判定：offsetParent 为空且无 client rect（比 getComputedStyle 便宜得多�?
             if (el.offsetParent === null && el.getClientRects().length === 0) continue;
             return $(el);
         }
@@ -3398,11 +3356,11 @@ ${allTableNames.map(tName => {
         return $last.length ? $last : null;
     };
 
-    // 找嵌入选项/仪表盘要挂的那条消息块。
-    // 之前仪表盘注入和选项注入各自内置一份一模一样的 getTargetContainer，
-    // 都靠 .filter() 全表扫 + 每条消息调 .css('display')（per-message getComputedStyle）
-    // 和 .find('.name_text')（子树查询）。这里提一份共享的，倒序找 + offsetParent
-    // 判隐藏，不再做那两个 per-node 调用。返回 .mes_block（没有则退回 .mes）。
+    // 找嵌入选项/仪表盘要挂的那条消息块�?
+    // 之前仪表盘注入和选项注入各自内置一份一模一样的 getTargetContainer�?
+    // 都靠 .filter() 全表�?+ 每条消息�?.css('display')（per-message getComputedStyle�?
+    // �?.find('.name_text')（子树查询）。这里提一份共享的，倒序�?+ offsetParent
+    // 判隐藏，不再做那两个 per-node 调用。返�?.mes_block（没有则退�?.mes）�?
     const getEmbeddedTargetBlock = () => {
         const { $ } = getCore();
         const $all = $('#chat .mes');
@@ -3422,9 +3380,9 @@ ${allTableNames.map(tName => {
         return null;
     };
 
-    // 正文列内容盒 = .mes_text 去掉左右 padding 后的可视文字区。
-    // 取不到（正文被 inline_media 隐藏、消息不可见等）时回退到 .mes_block 内容宽
-    // 减去 --mes-right-spacing，保证仍能对齐而不是干脆放弃。
+    // 正文列内容盒 = .mes_text 去掉左右 padding 后的可视文字区�?
+    // 取不到（正文�?inline_media 隐藏、消息不可见等）时回退�?.mes_block 内容�?
+    // 减去 --mes-right-spacing，保证仍能对齐而不是干脆放弃�?
     const getMessageColumnBox = ($lastMes) => {
         const contentBox = (el) => {
             const r = el.getBoundingClientRect();
@@ -3439,16 +3397,16 @@ ${allTableNames.map(tName => {
             const box = contentBox($mesText[0]);
             if (box.width > 0) return { box, contentBox };
         }
-        // 回退：.mes_block 内容宽 - 正文右留白。
-        // 没有 .mes_block 时不要退到 .mes——那个盒子含头像，量出来会偏左偏宽，
-        // 宁可放弃对齐（保持原宽度）也不要对到错的盒子上。
+        // 回退�?mes_block 内容�?- 正文右留白�?
+        // 没有 .mes_block 时不要退�?.mes——那个盒子含头像，量出来会偏左偏宽，
+        // 宁可放弃对齐（保持原宽度）也不要对到错的盒子上�?
         const $block = $lastMes.find('.mes_block').first();
         if (!$block.length) return null;
         const box = contentBox($block[0]);
-        // 右留白直接读 .mes_text 的 computed padding-right：CSSOM 给的是已换算好的
-        // 绝对 px，display:none 的元素同样能读到，所以不必解析 --mes-right-spacing
-        // 的原始 token（'2em' 之类 parseFloat 会读错），也不用往 DOM 里塞探针。
-        let spacing = 30; // 兜底用 ST 根变量默认值，别用 0——那等于没修
+        // 右留白直接读 .mes_text �?computed padding-right：CSSOM 给的是已换算好的
+        // 绝对 px，display:none 的元素同样能读到，所以不必解�?--mes-right-spacing
+        // 的原�?token�?2em' 之类 parseFloat 会读错），也不用往 DOM 里塞探针�?
+        let spacing = 30; // 兜底�?ST 根变量默认值，别用 0——那等于没修
         if ($mesText.length) {
             const px = parseFloat(window.getComputedStyle($mesText[0]).paddingRight);
             if (px >= 0) spacing = px;
@@ -3457,21 +3415,21 @@ ${allTableNames.map(tName => {
         return box.width > 0 ? { box, contentBox } : null;
     };
 
-    // 把一个注入到消息里的面板对齐到正文列。
+    // 把一个注入到消息里的面板对齐到正文列�?
     //
-    // 关键点：.mes_text 有 padding-right: var(--mes-right-spacing)（ST 默认 30px），
-    // 所以 outerWidth() 含这段留白，恰好等于 .mes_block 的内容宽 —— 也就是面板
-    // 作为块级子元素本来就有的宽度。早前版本用 outerWidth() 赋值是空操作，面板始终右溢。
-    // 这里一律取「内容宽」，并用 margin-left 补上面板父容器与正文列的左缘差
-    // （挂 .mes_block 时为 0；bottom 模式挂 #chat 时为头像+间距，约 70px）。
+    // 关键点：.mes_text �?padding-right: var(--mes-right-spacing)（ST 默认 30px），
+    // 所�?outerWidth() 含这段留白，恰好等于 .mes_block 的内容宽 —�?也就是面�?
+    // 作为块级子元素本来就有的宽度。早前版本用 outerWidth() 赋值是空操作，面板始终右溢�?
+    // 这里一律取「内容宽」，并用 margin-left 补上面板父容器与正文列的左缘�?
+    // （挂 .mes_block 时为 0；bottom 模式�?#chat 时为头像+间距，约 70px）�?
     //
-    // 注意：选项容器的样式表规则带 !important（见 .acu-embedded-options-container），
-    // 普通内联样式压不过它，必须用 setProperty 的 important 优先级写入。
-    // inset：两侧各内缩多少 px。嵌入式仪表盘/选项是主面板的附属块，
-    // 与主面板齐宽会显得呆板，内缩一点做出层次。
+    // 注意：选项容器的样式表规则�?!important（见 .acu-embedded-options-container），
+    // 普通内联样式压不过它，必须�?setProperty �?important 优先级写入�?
+    // inset：两侧各内缩多少 px。嵌入式仪表�?选项是主面板的附属块�?
+    // 与主面板齐宽会显得呆板，内缩一点做出层次�?
     // 只负责「量」，不写样式：读写必须分离，否则前一个面板的写会让后一个面板的
-    // 读触发强制同步重排。实测 1000 层聊天下交错读写 3 次 ≈ 11.8ms，
-    // 批量读再批量写 1 次 ≈ 3.4ms。
+    // 读触发强制同步重排。实�?1000 层聊天下交错读写 3 �?�?11.8ms�?
+    // 批量读再批量�?1 �?�?3.4ms�?
     const planPanelAlignment = ($panel, column, inset = 0) => {
         if (!$panel || !$panel.length || !column) return null;
         const { box, contentBox } = column;
@@ -3480,10 +3438,10 @@ ${allTableNames.map(tName => {
             const parentEl = el && el.parentElement;
             if (!parentEl) return null;
             const parent = contentBox(parentEl);
-            // 窄屏别硬缩：内缩后至少留 240px 可用宽。
-            // 注意是「夹住」不是「归零」——早前写成不够就 pad=0，会在列宽 260px 处
-            // 突跳 19.5px，而且更宽的列反而得到更窄的面板（非单调）。实测该阈值
-            // 正好落在 375px 和 390px 两种常见手机之间，拖窗宽跨过去会看到面板抽动。
+            // 窄屏别硬缩：内缩后至少留 240px 可用宽�?
+            // 注意是「夹住」不是「归零」——早前写成不够就 pad=0，会在列�?260px �?
+            // 突跳 19.5px，而且更宽的列反而得到更窄的面板（非单调）。实测该阈�?
+            // 正好落在 375px �?390px 两种常见手机之间，拖窗宽跨过去会看到面板抽动�?
             const pad = inset > 0
                 ? Math.max(0, Math.min(inset, Math.floor((box.width - 240) / 2)))
                 : 0;
@@ -3493,7 +3451,7 @@ ${allTableNames.map(tName => {
                 marginLeft: (box.left - parent.left + pad) + 'px',
             };
         } catch (e) {
-            console.debug('[ACU-UI] 正文列测量失败:', e);
+            console.debug('[ACU-UI] 正文列测量失�?', e);
             return null;
         }
     };
@@ -3506,24 +3464,24 @@ ${allTableNames.map(tName => {
             plan.el.style.setProperty('margin-left', plan.marginLeft, 'important');
             plan.el.style.setProperty('margin-right', '0', 'important');
         } catch (e) {
-            // 保持原宽度，不影响功能。留一条 debug：对齐失效过去很难发现
-            // （量错宽度只是视觉偏移，不报错），排查时至少有个抓手。
-            console.debug('[ACU-UI] 正文列对齐失败:', e);
+            // 保持原宽度，不影响功能。留一�?debug：对齐失效过去很难发�?
+            // （量错宽度只是视觉偏移，不报错），排查时至少有个抓手�?
+            console.debug('[ACU-UI] 正文列对齐失�?', e);
         }
     };
 
-    // 三个面板都注入在同一个 .mes_block 里（wrapper / 嵌入仪表盘 / 嵌入选项），
-    // 只对齐其中一个会让它们右缘参差，所以统一在这里一起对齐。
+    // 三个面板都注入在同一�?.mes_block 里（wrapper / 嵌入仪表�?/ 嵌入选项），
+    // 只对齐其中一个会让它们右缘参差，所以统一在这里一起对齐�?
     //
-    // 主面板对齐正文列满宽；嵌入的仪表盘/选项两侧各内缩一点——它们是主面板的
-    // 附属块，齐宽会显得跟主面板平级、整屏一根笔直的边，缩进后层次清楚。
-    // 内缩量取正文列宽的 3%，夹在 10~28px：宽屏不至于缩太多，窄屏不至于没效果。
+    // 主面板对齐正文列满宽；嵌入的仪表�?选项两侧各内缩一点——它们是主面板的
+    // 附属块，齐宽会显得跟主面板平级、整屏一根笔直的边，缩进后层次清楚�?
+    // 内缩量取正文列宽�?3%，夹�?10~28px：宽屏不至于缩太多，窄屏不至于没效果�?
     const EMBED_INSET_RATIO = 0.03;
     const EMBED_INSET_MIN = 10;
     const EMBED_INSET_MAX = 28;
-    // 一次 renderInterface 会经 insertHtmlToPage / 仪表盘注入 / 选项注入 三条路径
-    // 各调一次对齐，而最后一次就已覆盖全部三个面板 —— 前两次纯属重复测量。
-    // 用 rAF 合并到同一帧只跑一次；调用方仍可随便调，不必关心谁先谁后。
+    // 一�?renderInterface 会经 insertHtmlToPage / 仪表盘注�?/ 选项注入 三条路径
+    // 各调一次对齐，而最后一次就已覆盖全部三个面�?—�?前两次纯属重复测量�?
+    // �?rAF 合并到同一帧只跑一次；调用方仍可随便调，不必关心谁先谁后�?
     let alignRafPending = false;
     const alignWrapperToMessageColumn = () => {
         if (alignRafPending) return;
@@ -3544,11 +3502,11 @@ ${allTableNames.map(tName => {
             EMBED_INSET_MAX,
             Math.max(EMBED_INSET_MIN, column.box.width * EMBED_INSET_RATIO)
         ));
-        // 主面板(.acu-wrapper)不参与正文列对齐：保持 width:100% 全宽横跨屏幕。
+        // 主面�?.acu-wrapper)不参与正文列对齐：保�?width:100% 全宽横跨屏幕�?
         // 原因（用户实测确认）：对齐到正文列后左边是角色头像、右边空白，左右天生
-        // 不等长，视觉上反而显得不居中；全宽铺满底部才是平衡的。
-        // 嵌入的仪表盘/选项仍是附属块，对齐正文列并两侧内缩做出层次。
-        // 先全部量完再全部写，避免写-读交错触发强制重排（见 planPanelAlignment 注释）
+        // 不等长，视觉上反而显得不居中；全宽铺满底部才是平衡的�?
+        // 嵌入的仪表盘/选项仍是附属块，对齐正文列并两侧内缩做出层次�?
+        // 先全部量完再全部写，避免�?读交错触发强制重排（�?planPanelAlignment 注释�?
         const plans = [
             planPanelAlignment($('.acu-embedded-dashboard-container'), column, inset),
             planPanelAlignment($('.acu-embedded-options-container'), column, inset),
@@ -3556,82 +3514,15 @@ ${allTableNames.map(tName => {
         for (const p of plans) applyPanelAlignment(p);
     };
 
-    // H-05 单例 handleChatMutation：提升至模块级，rAF 合并复用
-    const handleChatMutation = () => {
-        if (chatObsRafPending) return;
-        chatObsRafPending = true;
-        requestAnimationFrame(() => {
-            chatObsRafPending = false;
-            const currentConfig = getConfig();
-            const $chatNode = $('#chat');
-            const $wrapper = $('.acu-wrapper');
-            if (!$chatNode.length || !$wrapper.length) return;
-            if (currentConfig.frontendPosition === 'message') {
-                const $lastMes = $chatNode.find('.mes').last();
-                if ($lastMes.length) {
-                    const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
-                    if (!$targetBlock.find('.acu-wrapper').length) {
-                        $targetBlock.append($wrapper);
-                    } else if ($targetBlock.children().last()[0] !== $wrapper[0]) {
-                        $targetBlock.append($wrapper);
-                    }
-                    alignWrapperToMessageColumnNow();
-                }
-            } else {
-                const children = $chatNode.children();
-                const lastChild = children.last()[0];
-                if (lastChild && lastChild !== $wrapper[0]) {
-                    if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
-                        $chatNode.append($wrapper);
-                    }
-                }
-                alignWrapperToMessageColumnNow();
-            }
-        });
-    };
-    // H-05 单例初始化：三重监听仅首次创建，后续仅更新观察目标
-    const ensureChatObservers = ($chat) => {
-        if (chatObserversReady) {
-            // 仅更新观察目标，避免每帧 disconnect/new
-            if ($chat && $chat.length && $chat[0] !== lastObservedChatEl) {
-                try { if (observer) observer.disconnect(); } catch (_) {}
-                try { observer.observe($chat[0], { childList: true }); lastObservedChatEl = $chat[0]; } catch (_) {}
-                try { if (columnResizeObserver) { columnResizeObserver.disconnect(); columnResizeObserver.observe($chat[0]); } } catch (_) {}
-            }
-            return;
-        }
-        observer = new MutationObserver(handleChatMutation);
-        $(window).off('resize.acu_align').on('resize.acu_align', () => {
-            if (chatResizeRafPending) return;
-            chatResizeRafPending = true;
-            requestAnimationFrame(() => {
-                chatResizeRafPending = false;
-                alignWrapperToMessageColumnNow();
-            });
-        });
-        if (typeof ResizeObserver !== 'undefined') {
-            columnResizeObserver = new ResizeObserver(() => {
-                if (chatRoRafPending) return;
-                chatRoRafPending = true;
-                requestAnimationFrame(() => {
-                    chatRoRafPending = false;
-                    alignWrapperToMessageColumnNow();
-                });
-            });
-        }
-        chatObserversReady = true;
-        if ($chat && $chat.length) {
-            try { observer.observe($chat[0], { childList: true }); lastObservedChatEl = $chat[0]; } catch (_) {}
-            if (columnResizeObserver) { try { columnResizeObserver.observe($chat[0]); } catch (_) {} }
-        }
-    };
-
     const insertHtmlToPage = (html) => {
         const { $ } = getCore();
         const $chat = $('#chat');
         const config = getConfig();
+        
         $('.acu-wrapper').remove();
+        
         const $newContent = $(html);
+        
         if (config.frontendPosition === 'message') {
              const $lastMes = $chat.find('.mes').last();
              if ($lastMes.length) {
@@ -3645,8 +3536,80 @@ ${allTableNames.map(tName => {
             if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
             alignWrapperToMessageColumn();
         }
-        // H-05 单例：首次创建三监听，后续仅更新目标，避免每帧 disconnect/new 开销
-        ensureChatObservers($chat);
+
+        // 优化：去�?subtree 监听，只观察 #chat 直接子级增删（新 .mes �?#chat 直接子元素）�?
+        // �?subtree:true 会监听消息内部深层渲染（swipe/代码块展开等）触发大量无意义回调�?
+        // 再加节流：批量增删时只处理最后一次，避免高频 jQuery 查找�?
+        let obsRafPending = false;
+        const handleChatMutation = () => {
+            if (obsRafPending) return;
+            obsRafPending = true;
+            requestAnimationFrame(() => {
+                obsRafPending = false;
+                const currentConfig = getConfig();
+                const $chatNode = $('#chat');
+                const $wrapper = $('.acu-wrapper');
+                if (!$chatNode.length || !$wrapper.length) return;
+                if (currentConfig.frontendPosition === 'message') {
+                    const $lastMes = $chatNode.find('.mes').last();
+                    if ($lastMes.length) {
+                        const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
+                        if (!$targetBlock.find('.acu-wrapper').length) {
+                            $targetBlock.append($wrapper);
+                        } else if ($targetBlock.children().last()[0] !== $wrapper[0]) {
+                            $targetBlock.append($wrapper);
+                        }
+                        alignWrapperToMessageColumnNow(); // 已在 rAF 内，直调免再延一�?
+                    }
+                } else {
+                    const children = $chatNode.children();
+                    const lastChild = children.last()[0];
+                    if (lastChild && lastChild !== $wrapper[0]) {
+                        if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
+                            $chatNode.append($wrapper);
+                        }
+                    }
+                    // 消息增删后重新对齐面板到正文�?
+                    alignWrapperToMessageColumnNow(); // 已在 rAF 内，直调免再延一�?
+                }
+            });
+        };
+        if (observer) observer.disconnect();
+        observer = new MutationObserver(handleChatMutation);
+
+        // 窗口 resize / 转屏后消息列宽度变化，复用对齐逻辑防重新贴边�?
+        // rAF 合并，避免转�?软键盘的 resize 风暴里反复强制布局�?
+        let resizeRafPending = false;
+        $(window).off('resize.acu_align').on('resize.acu_align', () => {
+            if (resizeRafPending) return;
+            resizeRafPending = true;
+            requestAnimationFrame(() => {
+                resizeRafPending = false;
+                alignWrapperToMessageColumnNow(); // 已在 rAF 内，直调免再延一�?
+            });
+        });
+
+        // ST 的「聊天宽度」滑块改的是 --sheldWidth，既不触�?window resize
+        // 也不�?#chat 的直接子级，光靠上面两个监听会让面板卡在旧的像素宽度�?
+        // 直接观察 #chat 尺寸变化补上这一类�?
+        if (columnResizeObserver) { columnResizeObserver.disconnect(); columnResizeObserver = null; }
+        if ($chat.length && typeof ResizeObserver !== 'undefined') {
+            let roRafPending = false;
+            columnResizeObserver = new ResizeObserver(() => {
+                if (roRafPending) return;
+                roRafPending = true;
+                requestAnimationFrame(() => {
+                    roRafPending = false;
+                    alignWrapperToMessageColumnNow(); // 已在 rAF 内，直调免再延一�?
+                });
+            });
+            columnResizeObserver.observe($chat[0]);
+        }
+
+        if ($chat.length) {
+            // 只观察直接子级增删；消息内部渲染不再触发
+            observer.observe($chat[0], { childList: true });
+        }
     };
 
     const renderTableContent = (tableData, tableName) => {
@@ -3665,9 +3628,8 @@ ${allTableNames.map(tName => {
 const checkRowChanged = (realIdx, row) => {
             if (currentDiffMap.has(`${tableName}-row-${realIdx}`)) return true;
             if (!row) return false;
-            // 不设列上限:generateDiffMap 生成键无列上限,这里封顶会让第 65+ 列的高亮丢失
-            // (Set.has 是 O(1),不封顶无性能意义)
-            const colLimit = row.length;
+            // 大行保护：只扫前 64 列，避免单行超长把主线程拖死
+            const colLimit = Math.min(row.length, 64);
             for (let c = 1; c < colLimit; c++) {
                 if (currentDiffMap.has(`${tableName}-${realIdx}-${c}`)) return true;
             }
@@ -3677,8 +3639,8 @@ const checkRowChanged = (realIdx, row) => {
         const reverseTables = getReverseOrderTables();
         const isReversed = reverseTables.includes(tableName);
         const totalRaw = tableData.rows.length;
-        // 高楼层/纪要表保护：无搜索时不做全量 map+sort，按索引窗口切片后再包一层元数据。
-        // 鸡尾酒启用后用户更容易堆到高楼层，全量 map 会让纪要表打开卡死甚至像「无法显示」。
+        // 高楼�?纪要表保护：无搜索时不做全量 map+sort，按索引窗口切片后再包一层元数据�?
+        // 鸡尾酒启用后用户更容易堆到高楼层，全�?map 会让纪要表打开卡死甚至像「无法显示」�?
         const HEAVY_RENDER_THRESHOLD = 300;
         const useHeavyFastPath = totalRaw > HEAVY_RENDER_THRESHOLD && !currentSearchTerm;
 
@@ -3717,7 +3679,7 @@ const checkRowChanged = (realIdx, row) => {
             const doFilter = (items) => {
                 if (!currentSearchTerm) return items;
                 const term = String(currentSearchTerm).toLowerCase();
-                // 逐格 toLowerCase + some() 短路(匹配列靠前即停),单次过滤比整行 join 快
+                // 逐格 toLowerCase + some() 短路(匹配列靠前即�?,单次过滤比整�?join �?
                 return items.filter(item => item.data && item.data.some(cell => String(cell).toLowerCase().includes(term)));
             };
             const doSort = (items) => {
@@ -3731,11 +3693,11 @@ const checkRowChanged = (realIdx, row) => {
             };
 
             if (currentSearchTerm) {
-                // 性能审查 P2-1:过滤+排序结果缓存——同一 (表+搜索词+数据版本+排序方向) 下
-                // 翻页/重复 render 复用,不再每次全量 map+filter+sort(大表 10-30ms → 0)。
-                // 失效锚用 dataVersion(只在 getTableData 产生新 clone 时递增),不用 rows 引用——
-                // rows 数组每次 processJsonData content.slice(1) 重建,引用锚会永不命中(第二轮
-                // 审查 explore-61 实证)。
+                // 性能审查 P2-1:过滤+排序结果缓存——同一 (�?搜索�?数据版本+排序方向) �?
+                // 翻页/重复 render 复用,不再每次全量 map+filter+sort(大表 10-30ms �?0)�?
+                // 失效锚用 dataVersion(只在 getTableData 产生�?clone 时递增),不用 rows 引用—�?
+                // rows 数组每次 processJsonData content.slice(1) 重建,引用锚会永不命中(第二�?
+                // 审查 explore-61 实证)�?
                 const cacheKey = tableName + '\u0001' + currentSearchTerm + '\u0001' + (isReversed ? 'r' : 'f') + '\u0001' + dataVersion;
                 if (searchCacheKey === cacheKey && searchCacheResult) {
                     processedRows = searchCacheResult;
@@ -3769,7 +3731,7 @@ const checkRowChanged = (realIdx, row) => {
             <div class="acu-panel-header">
                   <div class="acu-panel-title">
                     ${escapeHtml(tableName)} ${(tableData && tableData._missingInfo) ? '<span style="color:#e74c3c;font-weight:bold;">缺少' + escapeHtml(tableData._missingInfo) + '</span>' : ((tableData && tableData._hasWarning) ? '<span style="color:#e74c3c;font-weight:bold;">数量异常</span>' : '<span style="color:var(--acu-text-sub);font-weight:normal;">' + escapeHtml(displayTotal) + '</span>')}
-                    ${isBatchMode ? `<span style="margin-left:10px; font-size:12px; color:var(--acu-highlight); background:var(--acu-highlight-bg); padding:2px 8px; border-radius:4px;">已选 ${selectedCount}</span>` : ''}
+                    ${isBatchMode ? `<span style="margin-left:10px; font-size:12px; color:var(--acu-highlight); background:var(--acu-highlight-bg); padding:2px 8px; border-radius:4px;">已�?${selectedCount}</span>` : ''}
                 </div>
                 <div class="acu-header-actions">
                     <div class="acu-header-btn-group" style="display:flex; gap:6px; align-items:center;">
@@ -3778,11 +3740,11 @@ const checkRowChanged = (realIdx, row) => {
                         </button>
                         <input type="text" class="acu-search-input" id="acu-search-input" placeholder="搜索..." value="${escapeHtml(currentSearchTerm)}" style="${currentSearchTerm ? '' : 'display:none'}; width: 120px; margin-right: 4px; padding-left: 10px;" />
                         ${isMultiSelectMode ? `
-                        <button class="acu-header-btn" id="acu-btn-exit-multiselect" title="退出多选">
+                        <button class="acu-header-btn" id="acu-btn-exit-multiselect" title="退出多�?>
                             <i class="fa-solid fa-times"></i>
                         </button>
                         ` : `
-                        <button class="acu-header-btn" id="acu-btn-multiselect" title="多选">
+                        <button class="acu-header-btn" id="acu-btn-multiselect" title="多�?>
                             <i class="fa-solid fa-check-square"></i>
                         </button>
                         `}
@@ -3807,7 +3769,7 @@ const checkRowChanged = (realIdx, row) => {
         slicedRows.forEach((item) => {
             const row = item.data;
             const realIndex = item.originalIndex;
-             const cardTitle = row[titleColIndex] || '未命名';
+             const cardTitle = row[titleColIndex] || '未命�?;
             const showDefaultIndex = (titleColIndex === 1);
             const isRowNew = currentDiffMap.has(`${tableName}-row-${realIndex}`);
             const rowClass = isRowNew && config.highlightNew ? 'acu-highlight-changed' : '';
@@ -3816,7 +3778,7 @@ const checkRowChanged = (realIdx, row) => {
             const isPendingDelete = pendingDeletes.has(`${tableName}-row-${realIndex}`);
 
             html += `<div class="acu-data-card ${isSelected ? 'acu-card-selected' : ''}" data-row-key="${escapeHtml(rowKey)}">
-                        ${isPendingDelete ? '<div class="acu-badge-pending">待删除</div>' : ''}
+                        ${isPendingDelete ? '<div class="acu-badge-pending">待删�?/div>' : ''}
                         <div class="acu-card-header">
                             <input type=\"checkbox\" class=\"acu-card-checkbox\" data-row-key=\"${escapeHtml(rowKey)}\" ${isSelected ? 'checked' : ''} style=\"${isMultiSelectMode ? 'visibility:visible;' : 'visibility:hidden;'}\">
                             <span class="acu-card-index">${showDefaultIndex ? '#' + (realIndex + 1) : ''}</span>
@@ -3826,17 +3788,17 @@ const checkRowChanged = (realIdx, row) => {
             let gridHtml = ''; let fullHtml = '';
             row.forEach((cell, cIdx) => {
                 if (cIdx > 0 && cIdx !== titleColIndex) {
-                    const headerName = headers[cIdx - 1] || `属性${cIdx}`;
+                    const headerName = headers[cIdx - 1] || `属�?{cIdx}`;
                     const cellStr = String(cell);
                     const displayCell = cellStr.trim();
                     if (displayCell === 'auto_merged') return;
                     const isCellChanged = currentDiffMap.has(`${tableName}-${realIndex}-${cIdx}`);
                     const cellHighlight = isCellChanged && config.highlightNew ? 'acu-highlight-changed' : '';
-                    // 不再往属性里塞 data-val：encodeURIComponent 会把每个中文字扩成
-                    // 9 个字符（中 → %E4%B8%AD），实测 25 列 × 100 字的一页从 133KB
-                    // 涨到 560KB（4.2 倍），200 字时 180KB → 1029KB（5.7 倍），而这段
-                    // 内容只是页面上已经显示过的文字的副本。
-                    // 单元格已带 key/row/col，取值时从数据模型读回即可（见 readCellValue）。
+                    // 不再往属性里�?data-val：encodeURIComponent 会把每个中文字扩�?
+                    // 9 个字符（�?�?%E4%B8%AD），实测 25 �?× 100 字的一页从 133KB
+                    // 涨到 560KB�?.2 倍）�?00 字时 180KB �?1029KB�?.7 倍），而这�?
+                    // 内容只是页面上已经显示过的文字的副本�?
+                    // 单元格已�?key/row/col，取值时从数据模型读回即可（�?readCellValue）�?
                     const escHeader = escapeHtml(headerName);
                     const escCell = escapeHtml(displayCell);
                     const dataAttrs = `data-key="${escapeHtml(tableData.key)}" data-tname="${escapeHtml(tableName)}" data-row="${realIndex}" data-col="${cIdx}"`;
@@ -3899,106 +3861,6 @@ const checkRowChanged = (realIdx, row) => {
 
     const bindEvents = (tables) => {
         const { $ } = getCore();
-        latestTablesRef = tables;
-        // H-02 事件委托化：容器级单例，仅首次绑定，后续 render 仅更新 latestTablesRef，不再全量 querySelectorAll+off/on
-        if (!bindEventsDelegated) {
-            bindEventsDelegated = true;
-            // #acu-nav-bar 委托：tab 切换
-            $(document).on('click.acu_delegated_nav', '#acu-nav-bar .acu-nav-btn', function(e) {
-                e.stopPropagation();
-                if (isEditingOrder) return;
-                const tableName = $(this).data('table');
-                if ($(this).hasClass('active')) { closePanel(); } else {
-                    // 复用 switchTab 逻辑（需闭包 tables，故此处内联）
-                    isMultiSelectMode = false; selectedRows.clear(); pendingDeletes.clear();
-                    currentPage = 1; currentSearchTerm = ''; globalScrollTop = 0;
-                    if (tableName === TAB_DASHBOARD) {
-                        $('#acu-data-area').html(renderDashboard(latestTablesRef)).addClass('visible');
-                        const h = getTableHeights()[TAB_DASHBOARD]; $('#acu-data-area').css({height: h ? h + 'px' : '60vh', maxHeight: '95vh'});
-                    } else if (latestTablesRef && latestTablesRef[tableName]) {
-                        $('#acu-data-area').html(renderTableContent(latestTablesRef[tableName], tableName)).addClass('visible');
-                        const h = getTableHeights()[tableName]; $('#acu-data-area').css({height: h ? h + 'px' : '60vh', maxHeight: '95vh'});
-                    }
-                    $('.acu-nav-btn').removeClass('active');
-                    $(`.acu-nav-btn[data-table="${CSS.escape(tableName)}"]`).addClass('active');
-                    saveActiveTabState(tableName);
-                    // 委托路径仍需补绑 ID 级按钮与滚动淡入（热路径已委托，ID 按钮仍 per-render）
-                    try { if (typeof bindDataAreaEvents === 'function') bindDataAreaEvents(); } catch(_) {}
-                    try { bindScrollFade($('.acu-panel-content, .acu-dash-container, .acu-dash-npc-grid')); } catch(_) {}
-                    try { if (typeof updateDynamicActionButton === 'function') updateDynamicActionButton(); } catch(_) {}
-                }
-            });
-            // #acu-data-area 单容器委托：acu-cell / dash-interactive / tab-btn / page-btn / card 统一分发
-            $(document).on('click.acu_delegated_area', '#acu-data-area', function(e) {
-                const t = e.target;
-                const cell = t.closest('.acu-cell');
-                if (cell) { if(isMultiSelectMode) return; e.stopPropagation(); showCellMenu(e, cell); return; }
-                const dash = t.closest('.acu-dash-interactive');
-                if (dash) {
-                    e.stopPropagation();
-                    const tableName = dash.getAttribute('data-tname') || $(dash).data('tname');
-                    const rowIdx = parseInt(dash.getAttribute('data-row')); const colIdx = parseInt(dash.getAttribute('data-col'));
-                    if (tableName && latestTablesRef && latestTablesRef[tableName]) {
-                        const table = latestTablesRef[tableName]; const row = table.rows[rowIdx];
-                        if (row) showQuickView(row, table.headers, tableName, colIdx);
-                    }
-                    return;
-                }
-                const tabBtn = t.closest('.acu-tab-btn');
-                if (tabBtn) {
-                    e.stopPropagation();
-                    const $container = $(tabBtn).closest('.acu-dash-card');
-                    const index = $(tabBtn).index();
-                    $container.find('.acu-tab-btn').removeClass('active'); $(tabBtn).addClass('active');
-                    const $panes = $container.find('.acu-tab-pane'); $panes.removeClass('active');
-                    if ($panes.length > index) $panes.eq(index).addClass('active');
-                    return;
-                }
-                const pageBtn = t.closest('.acu-page-btn');
-                if (pageBtn) {
-                    e.stopPropagation();
-                    const $pb = $(pageBtn);
-                    if ($pb.hasClass('disabled') || $pb.attr('disabled') || $pb.hasClass('active')) return;
-                    const p = parseInt($pb.data('page')); if (!p) return;
-                    currentPage = p; globalScrollTop = 0;
-                    const tn = $('.acu-nav-btn.active').data('table');
-                    if (tn && latestTablesRef && latestTablesRef[tn]) {
-                        $('#acu-data-area').html(renderTableContent(latestTablesRef[tn], tn));
-                    }
-                    return;
-                }
-                const card = t.closest('.acu-data-card');
-                if (card && isMultiSelectMode) {
-                    if (!e.target.closest('.acu-card-checkbox')) {
-                        const $cb = $(card).find('.acu-card-checkbox');
-                        $cb.prop('checked', !$cb.prop('checked')).trigger('change');
-                    }
-                }
-            });
-            // change 委托（checkbox）
-            $(document).on('change.acu_delegated_area', '#acu-data-area .acu-card-checkbox', function(e) {
-                e.stopPropagation();
-                const rowKey = $(this).data('row-key');
-                const tableName = $('.acu-nav-btn.active').data('table');
-                const $card = $(this).closest('.acu-data-card');
-                const rowIndex = parseInt($card.find('.acu-editable-title').data('row'));
-                const key = $card.find('.acu-editable-title').data('key');
-                const delKey = `${tableName}-row-${rowIndex}`;
-                if ($(this).is(':checked')) {
-                    selectedRows.set(rowKey, { tableName, rowIndex, key });
-                    $card.addClass('acu-card-selected'); pendingDeletes.add(delKey);
-                    if ($card.find('.acu-badge-pending').length === 0) $card.prepend('<div class="acu-badge-pending">待删除</div>');
-                } else {
-                    selectedRows.delete(rowKey); $card.removeClass('acu-card-selected'); pendingDeletes.delete(delKey);
-                    $card.find('.acu-badge-pending').remove();
-                }
-                const selectedCount = Array.from(selectedRows.values()).filter(s => s.tableName === tableName).length;
-                const isBatchMode = isMultiSelectMode && selectedCount > 0;
-                const $title = $('.acu-panel-title'); $title.find('span[style*="margin-left:10px"]').remove();
-                if (isBatchMode) $title.append(`<span style="margin-left:10px; font-size:12px; color:var(--acu-highlight); background:var(--acu-highlight-bg); padding:2px 8px; border-radius:4px;">已选 ${selectedCount}</span>`);
-                updateDynamicActionButton();
-            });
-        }
         const stopSelectors = '.acu-data-display, .acu-nav-container, .acu-wrapper, .acu-edit-overlay, .acu-quick-view-overlay, .acu-cell-menu';
         $('body').off('wheel touchstart touchmove touchend click', stopSelectors).on('wheel touchstart touchmove touchend click', stopSelectors, function(e) {
             e.stopPropagation();
@@ -4046,21 +3908,19 @@ const checkRowChanged = (realIdx, row) => {
             $('.acu-nav-btn').removeClass('active');
             $(`.acu-nav-btn[data-table="${CSS.escape(tableName)}"]`).addClass('active');
             saveActiveTabState(tableName);
-            // 这里原本还有一次无条件 bindDataAreaEvents()：上面两个分支已各自绑过，
-            // 等于整套选择器扫描 + 数百个单元格 off/on 白跑一遍（.off 保证不重复
-            // 绑定，所以只是纯浪费不是泄漏）。删掉。
+            // 这里原本还有一次无条件 bindDataAreaEvents()：上面两个分支已各自绑过�?
+            // 等于整套选择器扫�?+ 数百个单元格 off/on 白跑一遍（.off 保证不重�?
+            // 绑定，所以只是纯浪费不是泄漏）。删掉�?
           };
 
-        if (!bindEventsDelegated) { $('.acu-nav-btn').off('click').on('click', function(e) {
+        $('.acu-nav-btn').off('click').on('click', function(e) {
             e.stopPropagation(); 
             if (isEditingOrder) return;
             const tableName = $(this).data('table');
             if ($(this).hasClass('active')) { closePanel(); } else { switchTab(tableName); }
-        }); }
+        });
         
-        // H-02 委托已接管热路径时，旧的每格 off/on 不再执行（保留注释待删，兼容期可回滚）
         const bindDynamicContentEvents = () => {
-            if (bindEventsDelegated) return;
             $('.acu-cell').off('click').on('click', function(e) { if(isMultiSelectMode) return; e.stopPropagation(); showCellMenu(e, this); });
              $('.acu-dash-interactive').off('click').on('click', function(e) {
                 e.stopPropagation();
@@ -4074,10 +3934,13 @@ const checkRowChanged = (realIdx, row) => {
             });
             $('.acu-tab-btn').off('click').on('click', function(e) {
                  e.stopPropagation();
+
                  const $container = $(this).closest('.acu-dash-card');
                  const index = $(this).index(); 
+
                  $container.find('.acu-tab-btn').removeClass('active');
                  $(this).addClass('active');
+
                  const $panes = $container.find('.acu-tab-pane');
                  $panes.removeClass('active');
                  if ($panes.length > index) {
@@ -4131,15 +3994,15 @@ const checkRowChanged = (realIdx, row) => {
                 }
             });
 
-            if (!bindEventsDelegated) { $('.acu-data-card').off('click').on('click', function(e) {
+            $('.acu-data-card').off('click').on('click', function(e) {
                 if (isMultiSelectMode) {
                     if (!$(e.target).is('.acu-card-checkbox')) {
                         const $cb = $(this).find('.acu-card-checkbox');
                         $cb.prop('checked', !$cb.prop('checked')).trigger('change');
                     }
                 }
-            }); }
-            if (!bindEventsDelegated) { $('.acu-card-checkbox').off('change').on('change', function(e) {
+            });
+            $('.acu-card-checkbox').off('change').on('change', function(e) {
                 e.stopPropagation();
                 const rowKey = $(this).data('row-key');
                 const tableName = $('.acu-nav-btn.active').data('table');
@@ -4153,7 +4016,7 @@ const checkRowChanged = (realIdx, row) => {
                     $card.addClass('acu-card-selected');
                     pendingDeletes.add(delKey);
                     if ($card.find('.acu-badge-pending').length === 0) {
-                        $card.prepend('<div class="acu-badge-pending">待删除</div>');
+                        $card.prepend('<div class="acu-badge-pending">待删�?/div>');
                     }
                 } else {
                     selectedRows.delete(rowKey);
@@ -4162,7 +4025,7 @@ const checkRowChanged = (realIdx, row) => {
                     $card.find('.acu-badge-pending').remove();
                 }
 
-                // 只更新头部的选中计数和按钮状态，不重新渲染整个表格
+                // 只更新头部的选中计数和按钮状态，不重新渲染整个表�?
                 const selectedCount = Array.from(selectedRows.values()).filter(s => s.tableName === tableName).length;
                 const isBatchMode = isMultiSelectMode && selectedCount > 0;
 
@@ -4170,11 +4033,11 @@ const checkRowChanged = (realIdx, row) => {
                 const $title = $('.acu-panel-title');
                 $title.find('span[style*="margin-left:10px"]').remove();
                 if (isBatchMode) {
-                    $title.append(`<span style="margin-left:10px; font-size:12px; color:var(--acu-highlight); background:var(--acu-highlight-bg); padding:2px 8px; border-radius:4px;">已选 ${selectedCount}</span>`);
+                    $title.append(`<span style="margin-left:10px; font-size:12px; color:var(--acu-highlight); background:var(--acu-highlight-bg); padding:2px 8px; border-radius:4px;">已�?${selectedCount}</span>`);
                 }
 
                 updateDynamicActionButton();
-            }); }
+            });
 
             $('#acu-btn-search-toggle').off('click').on('click', function(e) {
                 e.stopPropagation();
@@ -4198,16 +4061,16 @@ const checkRowChanged = (realIdx, row) => {
                 $(this).trigger('input');
             });
             // 搜索必须防抖：带搜索词时 useHeavyFastPath 会被关掉（它要求 !currentSearchTerm），
-            // 于是每敲一个字都对全表做 map+filter+sort，还要重建并重绑整页单元格。
-            // 大表（几千行纪要）上逐字重算会明显卡输入。180ms 足够连续输入合并成一次。
+            // 于是每敲一个字都对全表�?map+filter+sort，还要重建并重绑整页单元格�?
+            // 大表（几千行纪要）上逐字重算会明显卡输入�?80ms 足够连续输入合并成一次�?
             let searchDebounceTimer = null;
             const runSearchRender = () => {
                 const tableName = $('.acu-nav-btn.active').data('table');
                 if (!tableName || !tables[tableName]) return;
                 const fullHtml = renderTableContent(tables[tableName], tableName);
                 const $temp = $('<div>').html(fullHtml);
-                // 用 contents().appendTo 搬节点，避免 .html() 再序列化一遍又重新解析
-                // （原写法等于对同一份 HTML 走三遍：build → parse → serialize+parse）
+                // �?contents().appendTo 搬节点，避免 .html() 再序列化一遍又重新解析
+                // （原写法等于对同一�?HTML 走三遍：build �?parse �?serialize+parse�?
                 const $dst = $('.acu-panel-content').empty();
                 $temp.find('.acu-panel-content').contents().appendTo($dst);
                 const $dstTitle = $('.acu-panel-title').empty();
@@ -4318,7 +4181,7 @@ const checkRowChanged = (realIdx, row) => {
                         for (const r of rows) {
                             try {
                                 const res = await api.deleteRow(t, r + 1);
-                                // DB 8.9 deleteRow 只返回 true/false；放宽为 res !== true 防御未来返回 -1 等
+                                // DB 8.9 deleteRow 只返�?true/false；放宽为 res !== true 防御未来返回 -1 �?
                                 if (res !== true) { failedRows++; if (!failedTableNames.includes(t)) failedTableNames.push(t); }
                             } catch (e) { failedRows++; if (!failedTableNames.includes(t)) failedTableNames.push(t); console.warn('[ACU-API] deleteRow 失败:', e); }
                         }
@@ -4328,14 +4191,14 @@ const checkRowChanged = (realIdx, row) => {
                     selectedRows.clear();
                     if (window.toastr) {
                         if (failedRows === 0) window.toastr.success('删除成功');
-                        else window.toastr.warning(`删除部分完成：${failedRows} 行失败（${failedTableNames.join('、') || '未知表'}），请检查数据库状态。`);
+                        else window.toastr.warning(`删除部分完成�?{failedRows} 行失败（${failedTableNames.join('�?) || '未知�?}），请检查数据库状态。`);
                     }
                     cachedTableData = null;
                     lastRawTableRef = null;
                     lastTableSetFingerprint = '';
                     renderInterface(true);
                 } else {
-                    cachedTableData = null; const _d = getTableData(true); if(_d) saveSnapshot(_d); currentDiffMap.clear(); renderInterface(true); if (window.toastr) window.toastr.info('已刷新');
+                    cachedTableData = null; const _d = getTableData(true); if(_d) saveSnapshot(_d); currentDiffMap.clear(); renderInterface(true); if (window.toastr) window.toastr.info('已刷�?);
                 }
             });
 
@@ -4367,35 +4230,35 @@ const checkRowChanged = (realIdx, row) => {
             e.preventDefault(); e.stopPropagation();
             if (isEditingOrder) return;
             const core = getCore();
-            // 优先走 V2 新 UI（带"基础模式/高手模式"切换的工作台），
-            // 通过 window.AutoCardUpdaterV2API.open() 暴露；旧版数据库无此 API 时回退到原 openSettings。
+            // 优先�?V2 �?UI（带"基础模式/高手模式"切换的工作台），
+            // 通过 window.AutoCardUpdaterV2API.open() 暴露；旧版数据库无此 API 时回退到原 openSettings�?
             const apiV2 = core.getDBV2();
             if (apiV2 && typeof apiV2.open === 'function') {
                 try { await apiV2.open(); return; }
-                catch (err) { console.warn('[ACU-API] V2 open 失败，回退旧入口:', err); }
+                catch (err) { console.warn('[ACU-API] V2 open 失败，回退旧入�?', err); }
             }
             const api = core.getDB();
             if (api && api.openSettings) {
                 await api.openSettings();
             } else if (window.toastr) {
-                window.toastr.error('无法调用数据库设置接口');
+                window.toastr.error('无法调用数据库设置接�?);
             }
         });
         $('#acu-btn-open-visualizer').off('click').on('click', async function(e) {
             e.preventDefault(); e.stopPropagation();
             if (isEditingOrder) return;
             const core = getCore();
-            // 优先走 V2 新 UI 的表格编辑器（openVisualizerSurface_ACU），旧版数据库无 V2 API 时回退。
+            // 优先�?V2 �?UI 的表格编辑器（openVisualizerSurface_ACU），旧版数据库无 V2 API 时回退�?
             const apiV2 = core.getDBV2();
             if (apiV2 && typeof apiV2.openVisualizer === 'function') {
                 try { await apiV2.openVisualizer(); return; }
-                catch (err) { console.warn('[ACU-API] V2 openVisualizer 失败，回退旧入口:', err); }
+                catch (err) { console.warn('[ACU-API] V2 openVisualizer 失败，回退旧入�?', err); }
             }
             const api = core.getDB();
             if (api && api.openVisualizer) {
                 api.openVisualizer();
             } else if (window.toastr) {
-                window.toastr.error('无法调用表格编辑器接口');
+                window.toastr.error('无法调用表格编辑器接�?);
             }
         });
         $('#acu-btn-manual-update').off('click').on('click', async function(e) {
@@ -4406,8 +4269,8 @@ const checkRowChanged = (realIdx, row) => {
             const doc = w.document || document;
             const apiV2 = core.getDBV2();
 
-            // 工具：按按钮 visible text 精确等值匹配（不做 includes，避免误命中「执行手动填表」等含相似字的按钮）。
-            // excludeTexts：候选中显式排除的文案，命中即跳过该按钮。
+            // 工具：按按钮 visible text 精确等值匹配（不做 includes，避免误命中「执行手动填表」等含相似字的按钮）�?
+            // excludeTexts：候选中显式排除的文案，命中即跳过该按钮�?
             const findButtonByExactText = (root, texts, excludeTexts = ['执行手动填表']) => {
                 const root_ = root || doc;
                 const buttons = root_.querySelectorAll('button');
@@ -4421,7 +4284,7 @@ const checkRowChanged = (realIdx, row) => {
                 }
                 return null;
             };
-            // 轮询等待目标按钮出现且可点（非 disabled），找到即 click；最多 maxTries 次（每次 100ms）。
+            // 轮询等待目标按钮出现且可点（�?disabled），找到�?click；最�?maxTries 次（每次 100ms）�?
             const waitAndClick = async (findFn, maxTries = 30, requireEnabled = true) => {
                 for (let i = 0; i < maxTries; i++) {
                     const root = doc.getElementById('acu-app-v2') || doc;
@@ -4435,7 +4298,7 @@ const checkRowChanged = (realIdx, row) => {
             const runLegacyManualUpdate = async () => {
                 const api = core.getDB();
                 if (!api || typeof api.manualUpdate !== 'function') {
-                    if (window.toastr) window.toastr.error('无法调用数据库更新接口');
+                    if (window.toastr) window.toastr.error('无法调用数据库更新接�?);
                     return;
                 }
                 try {
@@ -4448,12 +4311,12 @@ const checkRowChanged = (realIdx, row) => {
                         if (available.length > 0 && intersect.length === 0 && sel.hasManualSelection === true) {
                             if (typeof api.clearManualSelectedTables === 'function') {
                                 await api.clearManualSelectedTables();
-                                if (window.toastr) window.toastr.info('已恢复为全表更新（之前的表选择已失效）。');
+                                if (window.toastr) window.toastr.info('已恢复为全表更新（之前的表选择已失效）�?);
                             }
                         }
                     }
                 } catch (probeErr) {
-                    console.warn('[ACU-API] 手动更新前置探测失败，继续按原流程执行:', probeErr);
+                    console.warn('[ACU-API] 手动更新前置探测失败，继续按原流程执�?', probeErr);
                 }
                 try {
                     if (typeof api.openSettings === 'function') {
@@ -4461,28 +4324,28 @@ const checkRowChanged = (realIdx, row) => {
                         await new Promise(r => setTimeout(r, 120));
                     }
                 } catch (openErr) {
-                    console.warn('[ACU-API] openSettings 失败，继续尝试 manualUpdate:', openErr);
+                    console.warn('[ACU-API] openSettings 失败，继续尝�?manualUpdate:', openErr);
                 }
                 try {
                     await api.manualUpdate();
                 } catch (err) {
                     console.error('[ACU-API] manualUpdate 调用失败:', err);
-                    if (window.toastr) window.toastr.error('手动更新调用失败，请查看控制台。');
+                    if (window.toastr) window.toastr.error('手动更新调用失败，请查看控制台�?);
                 }
             };
 
-            // 仅当 V2 真正不可用时走旧 UI 回退；V2 路径中的任何异常都不再回退到 manualUpdate，
-            // 否则会出现「新 UI 已打开 + 全选成功」之后误触发旧 UI 手动填表的串味。
+            // 仅当 V2 真正不可用时走旧 UI 回退；V2 路径中的任何异常都不再回退�?manualUpdate�?
+            // 否则会出现「新 UI 已打开 + 全选成功」之后误触发�?UI 手动填表的串味�?
             if (!apiV2 || typeof apiV2.open !== 'function') {
                 await runLegacyManualUpdate();
                 return;
             }
 
-            // V2 优先路径：打开工作台 → 切到填表工作台页 → 静默点「全选」→ 点「一键追平所选表未填楼层」。
+            // V2 优先路径：打开工作�?�?切到填表工作台页 �?静默点「全选」→ 点「一键追平所选表未填楼层」�?
             try {
                 await apiV2.open();
             } catch (openErr) {
-                console.warn('[ACU-API] V2 open 失败，回退旧 UI 手动填表:', openErr);
+                console.warn('[ACU-API] V2 open 失败，回退�?UI 手动填表:', openErr);
                 await runLegacyManualUpdate();
                 return;
             }
@@ -4490,11 +4353,11 @@ const checkRowChanged = (realIdx, row) => {
             const root0 = doc.getElementById('acu-app-v2');
             if (root0 && root0.style.display === 'none') root0.style.display = '';
 
-            // 0) 基础模式兼容：基础模式(isBasicMode)下只有 basic-config 页可见，form-fill 页/
-            //    「全选」/「一键追平」按钮都不可达。优化：单轮轮询**同时**找 form-fill 与
-            //    「切换到高手模式」按钮——基础模式下 form-fill 永不出现,若只先试 form-fill
-            //    会白等满 30 次(3s)才去识别模式;合并轮询任一出现即处理,基础模式立即切换。
-            //    注:切换会持久化用户模式为 advanced(DB persist),属预期副作用。
+            // 0) 基础模式兼容：基础模式(isBasicMode)下只�?basic-config 页可见，form-fill �?
+            //    「全选�?「一键追平」按钮都不可达。优化：单轮轮询**同时**�?form-fill �?
+            //    「切换到高手模式」按钮——基础模式�?form-fill 永不出现,若只先试 form-fill
+            //    会白等满 30 �?3s)才去识别模式;合并轮询任一出现即处�?基础模式立即切换�?
+            //    �?切换会持久化用户模式�?advanced(DB persist),属预期副作用�?
             let okNav = null;
             let modeBtnEl = null;
             {
@@ -4504,7 +4367,7 @@ const checkRowChanged = (realIdx, row) => {
                     const rt = rootEl();
                     okNav = rt.querySelector('button[data-page-id="form-fill"]');
                     if (okNav) { okNav.click(); break; } // 高手模式:命中即点导航切到填表工作台页
-                    modeBtnEl = findButtonByExactText(rt, ['切换到高手模式'], []);
+                    modeBtnEl = findButtonByExactText(rt, ['切换到高手模�?], []);
                     if (!okNav && !modeBtnEl) { await new Promise(r => setTimeout(r, 100)); i++; }
                 }
             }
@@ -4514,37 +4377,37 @@ const checkRowChanged = (realIdx, row) => {
                 okNav = await waitAndClick((rt) => rt.querySelector('button[data-page-id="form-fill"]'), 30, false);
             }
 
-            // 1) 切到填表工作台页（侧边栏 button[data-page-id="form-fill"] 触发 setActivePage）
+            // 1) 切到填表工作台页（侧边栏 button[data-page-id="form-fill"] 触发 setActivePage�?
             if (!okNav) {
-                if (window.toastr) window.toastr.info('已打开数据库工作台，请在「填表工作台」页点「一键追平」按钮。', { timeOut: 3500 });
+                if (window.toastr) window.toastr.info('已打开数据库工作台，请在「填表工作台」页点「一键追平」按钮�?, { timeOut: 3500 });
                 return;
             }
-            // 给 form-fill 页 mount + 选择器渲染留时间
+            // �?form-fill �?mount + 选择器渲染留时间
             await new Promise(r => setTimeout(r, 350));
 
             // 2) 静默全选：填表工作台手动填表面板里的「全选」按钮（精确等值匹配）
-            const okSel = await waitAndClick((rt) => findButtonByExactText(rt, ['全选'], []), 25, false);
-            if (!okSel) console.warn('[ACU-API] 未找到「全选」按钮，将直接尝试追平（可能被「未选择表格」拦下）。');
+            const okSel = await waitAndClick((rt) => findButtonByExactText(rt, ['全�?], []), 25, false);
+            if (!okSel) console.warn('[ACU-API] 未找到「全选」按钮，将直接尝试追平（可能被「未选择表格」拦下）�?);
 
-            // 给 Vue 响应式把 selectedManualTableKeys 传到追平按钮 disabled 绑定上留时间
+            // �?Vue 响应式把 selectedManualTableKeys 传到追平按钮 disabled 绑定上留时间
             await new Promise(r => setTimeout(r, 250));
 
-            // 3) 点「一键追平所选表未填楼层」；显式排除「执行手动填表」按钮（否则 includes 会误命中）
-            //    追平按钮文案在忙时显示「追平中...」，此时 disabled，需等到非忙态可点。
+            // 3) 点「一键追平所选表未填楼层」；显式排除「执行手动填表」按钮（否则 includes 会误命中�?
+            //    追平按钮文案在忙时显示「追平中...」，此时 disabled，需等到非忙态可点�?
             const okCatch = await waitAndClick((rt) => findButtonByExactText(rt, ['一键追平所选表未填楼层'], ['执行手动填表']), 30, true);
             if (okCatch) {
-                if (window.toastr) window.toastr.info('已在数据库工作台静默全选并触发追平。', { timeOut: 2500 });
-                // 追平（runManualCatchUp）成功**不触发** _notifyTableUpdate / _notifyTableFillStart，
-                // 前端拿不到任何刷新信号 → 选项表/表格停在旧数据。这里启动追平完成检测轮询：
-                // 每 1.5s 轻量指纹比对 DB 数据，连续 3 次稳定判定追平结束，随后强制重拉+重渲染。
-                // 注意：timer/状态必须是模块级单例，防止连点多个 setInterval 并存导致双 finishCatchup。
+                if (window.toastr) window.toastr.info('已在数据库工作台静默全选并触发追平�?, { timeOut: 2500 });
+                // 追平（runManualCatchUp）成�?*不触�?* _notifyTableUpdate / _notifyTableFillStart�?
+                // 前端拿不到任何刷新信�?�?选项�?表格停在旧数据。这里启动追平完成检测轮询：
+                // �?1.5s 轻量指纹比对 DB 数据，连�?3 次稳定判定追平结束，随后强制重拉+重渲染�?
+                // 注意：timer/状态必须是模块级单例，防止连点多个 setInterval 并存导致�?finishCatchup�?
                 const CATCHUP_POLL_MS = 1500;
                 const CATCHUP_STABLE_N = 3;
-                const CATCHUP_MAX_MS = 10 * 60 * 1000; // 10 分钟硬上限
+                const CATCHUP_MAX_MS = 10 * 60 * 1000; // 10 分钟硬上�?
                 const apiDB = core.getDB();
                 // stopCatchupPoll 为模块级定义（见 IIFE 顶层），此处直接引用
                 const finishCatchup = (saved) => {
-                    if (!catchupTimer) return; // 已结束（幂等守卫）
+                    if (!catchupTimer) return; // 已结束（幂等守卫�?
                     stopCatchupPoll();
                     // 追平结束：清缓存 + 强制重拉 + 重渲染（含选项表），并把当前态存为新基线
                     cachedTableData = null;
@@ -4553,19 +4416,18 @@ const checkRowChanged = (realIdx, row) => {
                     currentDiffMap.clear();
                     try { const d = getTableData(true); if (d) saveSnapshot(d); } catch (_) {}
                     try { renderInterface(true); } catch (_) {}
-                    if (window.toastr) window.toastr.success(saved ? '追平完成，数据已刷新。' : '追平结束，数据已刷新。', { timeOut: 2500 });
+                    if (window.toastr) window.toastr.success(saved ? '追平完成，数据已刷新�? : '追平结束，数据已刷新�?, { timeOut: 2500 });
                 };
-                // 连点保护：新点击先停掉旧轮询;同时停填表轮询(双向互斥,防 1.5s+2s 叠加重建)
+                // 连点保护：新点击先停掉旧轮询
                 stopCatchupPoll();
-                stopFillPoll();
                 catchupStable = 0;
                 catchupStartTs = Date.now();
-                // 首 tick 前先同步采样基线，避免把"追平刚开始还没写"误判为稳定
+                // �?tick 前先同步采样基线，避免把"追平刚开始还没写"误判为稳�?
                 try {
                     if (apiDB && typeof apiDB.exportTableAsJson === 'function') {
                         catchupLastFp = lightFingerprint(apiDB.exportTableAsJson());
                     }
-                } catch (_) { /* 采样失败，下一 tick 补基线 */ }
+                } catch (_) { /* 采样失败，下一 tick 补基�?*/ }
                 catchupTimer = setInterval(() => {
                     try {
                         if (Date.now() - catchupStartTs > CATCHUP_MAX_MS) { finishCatchup(false); return; }
@@ -4573,11 +4435,11 @@ const checkRowChanged = (realIdx, row) => {
                         if (!apiDB || typeof apiDB.exportTableAsJson !== 'function') { stopCatchupPoll(); return; }
                         const fp = lightFingerprint(apiDB.exportTableAsJson());
                         if (catchupLastFp !== null && fp !== catchupLastFp) {
-                            catchupStable = 0; // 数据还在变：追平进行中
-                            // 即时刷新：追平/填表后前端不即时刷新是用户反馈的痛点——DB 追平不调
-                            // _notifyTableUpdate(契约),这里数据一变就 renderInterface(true) 让用户实时看到
-                            // 追平写入的楼层;性能由 P1-1 按表克隆兜底(只克隆变化的 sheet,非全表)。
-                            // 与 fillPoll 的「变化即刷新」语义对齐,追平结束无需再等稳定窗口才刷新。
+                            catchupStable = 0; // 数据还在变：追平进行�?
+                            // 即时刷新：追�?填表后前端不即时刷新是用户反馈的痛点——DB 追平不调
+                            // _notifyTableUpdate(契约),这里数据一变就 renderInterface(true) 让用户实时看�?
+                            // 追平写入的楼�?性能�?P1-1 按表克隆兜底(只克隆变化的 sheet,非全�?�?
+                            // �?fillPoll 的「变化即刷新」语义对�?追平结束无需再等稳定窗口才刷新�?
                             lastRawTableRef = null;
                             lastTableSetFingerprint = '';
                             lastTableDataRefreshed = true;
@@ -4589,12 +4451,12 @@ const checkRowChanged = (realIdx, row) => {
                         catchupLastFp = fp;
                     } catch (_) { /* 轮询一次异常忽略，继续 */ }
                 }, CATCHUP_POLL_MS);
-                // 兜底：若 10 分钟没到（被 stop 或异常），确保不悬挂。
-                // 单例 timer：新点击先 stop（clearTimeout），旧兜底不会误终止新轮询。
+                // 兜底：若 10 分钟没到（被 stop 或异常），确保不悬挂�?
+                // 单例 timer：新点击�?stop（clearTimeout），旧兜底不会误终止新轮询�?
                 if (catchupFallbackTimer) clearTimeout(catchupFallbackTimer);
                 catchupFallbackTimer = setTimeout(() => { finishCatchup(false); }, CATCHUP_MAX_MS + 2000);
             } else {
-                if (window.toastr) window.toastr.warning('未找到追平按钮，请在「填表工作台」页手动点击「一键追平所选表未填楼层」。', { timeOut: 3500 });
+                if (window.toastr) window.toastr.warning('未找到追平按钮，请在「填表工作台」页手动点击「一键追平所选表未填楼层」�?, { timeOut: 3500 });
             }
         });
 
@@ -4650,7 +4512,7 @@ const checkRowChanged = (realIdx, row) => {
         let gridHtml = ''; let fullHtml = '';
         row.forEach((cell, cIdx) => {
              if (cIdx > 0) {
-                const headerName = headers[cIdx] || `属性${cIdx}`;
+                const headerName = headers[cIdx] || `属�?{cIdx}`;
                 const cellStr = String(cell);
                 const displayCell = cellStr.trim();
                 if (displayCell === 'auto_merged') return;
@@ -4674,7 +4536,7 @@ const checkRowChanged = (realIdx, row) => {
             <div class="acu-quick-view-overlay${overlayThemeClass(config.theme)}">
                 <div class="acu-quick-view-card acu-theme-${config.theme}" style="--acu-font-size: ${config.fontSize}px; font-size: ${config.fontSize}px; --acu-text-max-height:${config.limitLongText!==false?'80px':'none'}; --acu-text-overflow:${config.limitLongText!==false?'auto':'visible'}">
                      <div class="acu-quick-view-header">
-                        <span><i class="fa-solid ${getIconForTableName(tableName)}"></i> ${escapeHtml(row[(titleColIdx !== undefined && titleColIdx !== null) ? titleColIdx : 1] || '详情')}</span>
+                        <span><i class="fa-solid ${getIconForTableName(tableName)}"></i> ${row[(titleColIdx !== undefined && titleColIdx !== null) ? titleColIdx : 1] || '详情'}</span>
                         <button class="acu-header-btn" id="qv-close"><i class="fa-solid fa-times"></i></button>
                      </div>
                      <div class="acu-quick-view-body">
@@ -4818,7 +4680,7 @@ const checkRowChanged = (realIdx, row) => {
             pendingDeletes.add(deleteKey);
             const $card = $(`.acu-data-card[data-row-key="${CSS.escape(tableName)}-${rowIdx}"]`);
             if ($card.length && $card.find('.acu-badge-pending').length === 0) {
-                $card.prepend('<div class="acu-badge-pending">待删除</div>');
+                $card.prepend('<div class="acu-badge-pending">待删�?/div>');
             }
             updateDynamicActionButton();
         });
@@ -4834,9 +4696,9 @@ const checkRowChanged = (realIdx, row) => {
             closeAll();
             showEditDialog(content, async (newVal) => {
                 const $cell = $(cell);
-                // 单元格不再存 data-val，模型以 content[rowIdx+1][colIdx] 为准。
+                // 单元格不再存 data-val，模型以 content[rowIdx+1][colIdx] 为准�?
                 // 缓存同步挪到下面紧邻持久化处做，这样失败回滚能一并撤回，
-                // 否则 save 静默失败时缓存里会一直留着 DB 拒绝掉的值。
+                // 否则 save 静默失败时缓存里会一直留着 DB 拒绝掉的值�?
 
                 let $displayTarget = $cell;
                 if ($cell.hasClass('acu-grid-item')) $displayTarget = $cell.find('.acu-grid-value');
@@ -4850,7 +4712,7 @@ const checkRowChanged = (realIdx, row) => {
                 const rawData = getTableData();
                 if (rawData && rawData[tableKey]?.content[rowIdx + 1]) {
                       const oldVal = rawData[tableKey].content[rowIdx + 1][colIdx];
-                      // 先暂存乐观写入的标记，失败时连同 cachedTableData 一起回滚
+                      // 先暂存乐观写入的标记，失败时连同 cachedTableData 一起回�?
                       const cacheSheet = cachedTableData && tableKey ? cachedTableData[tableKey] : null;
                       if (cacheSheet && Array.isArray(cacheSheet.content) && cacheSheet.content[rowIdx + 1]) {
                           cacheSheet.content[rowIdx + 1][colIdx] = newVal;
@@ -4864,14 +4726,14 @@ const checkRowChanged = (realIdx, row) => {
                           newValue: newVal
                       });
                       if (ok === false) {
-                          // 保存失败：回滚上游数据与乐观写入的缓存，防止显示与 DB 持久分歧
+                          // 保存失败：回滚上游数据与乐观写入的缓存，防止显示�?DB 持久分歧
                           try { rawData[tableKey].content[rowIdx + 1][colIdx] = oldVal; } catch (_) {}
                           try { if (cacheSheet && cacheSheet.content[rowIdx + 1]) cacheSheet.content[rowIdx + 1][colIdx] = oldVal; } catch (_) {}
                           cachedTableData = null;
                           lastRawTableRef = null;
                           lastTableSetFingerprint = '';
                           renderInterface(true);
-                          if (window.toastr) window.toastr.error('保存失败，已回滚并刷新。');
+                          if (window.toastr) window.toastr.error('保存失败，已回滚并刷新�?);
                       }
                 } 
             });
@@ -4883,13 +4745,13 @@ const checkRowChanged = (realIdx, row) => {
                 const sheet = rawData[tableKey];
                 const headers = sheet.content[0] || [];
                 const colCount = headers.length || 2;
-                // 不再伪造 row_id（在 SQLite 存储模式下 row_id 是主键，伪造会触发静默写入失败）。
-                // 改为构造以列名为键的数据对象交给 DB 的 insertRow，让 DB 自行处理主键与持久化。
+                // 不再伪�?row_id（在 SQLite 存储模式�?row_id 是主键，伪造会触发静默写入失败）�?
+                // 改为构造以列名为键的数据对象交�?DB �?insertRow，让 DB 自行处理主键与持久化�?
                 const newRowObj = {};
                 for (let c = 0; c < colCount; c++) {
                     const colName = headers[c];
                     if (!colName) continue;
-                    // row_id 列跳过，交给 DB 自增；其余列置空。
+                    // row_id 列跳过，交给 DB 自增；其余列置空�?
                     if (colName === 'row_id' || colName === 'row_id ' || /行号|行ID|编号/i.test(colName)) continue;
                     newRowObj[colName] = '';
                 }
@@ -4902,20 +4764,14 @@ const checkRowChanged = (realIdx, row) => {
                         ok = (result !== false && result !== -1 && result !== null && result !== undefined);
                     }
                 } catch (e) { console.warn('[ACU-API] insertRow 调用失败:', e); ok = false; }
-                // 兜底：旧版 DB 无 insertRow 或调用失败时退回全量保存，但绝不伪造 row_id。
-                // 位置语义对齐 DB insertRow（始终表尾 push）：兜底也 push 到表尾，而非菜单所在行后。
+                // 兜底：旧�?DB �?insertRow 或调用失败时退回全量保存，但绝不伪�?row_id�?
+                // 位置语义对齐 DB insertRow（始终表�?push）：兜底�?push 到表尾，而非菜单所在行后�?
                 if (!ok) {
                     const newRow = headers.map(() => '');
                     sheet.content.push(newRow);
-                    let savedOk = false;
-                    try { savedOk = (await saveDataToDatabase(rawData, false, true)) !== false; } catch (e) { console.warn('[ACU-API] 兜底保存异常:', e); }
-                    if (!savedOk) {
-                        sheet.content.pop(); // 保存失败:回滚幻影行,避免缓存残留
-                        if (window.toastr) window.toastr.error('插入新行失败，已回滚。');
-                        return;
-                    }
+                    await saveDataToDatabase(rawData, false, true);
                 } else {
-                    // 成功路径：让 DB 的更新回调驱动刷新，无需手动 render。
+                    // 成功路径：让 DB 的更新回调驱动刷新，无需手动 render�?
                 }
             }
         });
@@ -5015,7 +4871,7 @@ const checkRowChanged = (realIdx, row) => {
         const dialog = $(`
             <div class="acu-edit-overlay${overlayThemeClass(config.theme)}">
                 <div class="acu-edit-dialog acu-theme-${config.theme}">
-                    <div class="acu-edit-title">编辑单元格内容</div>
+                    <div class="acu-edit-title">编辑单元格内�?/div>
                     <textarea class="acu-edit-textarea">${escapeHtml(content)}</textarea>
                      <div class="acu-dialog-btns">
                         <button class="acu-dialog-btn" id="dlg-cancel"><i class="fa-solid fa-times"></i> 取消</button>
@@ -5074,14 +4930,14 @@ const checkRowChanged = (realIdx, row) => {
 
                         <div>
                             <label style="font-weight:bold; display:block; margin-bottom:5px;">显示标题</label>
-                            <input type="text" id="slot-title" value="${escapeHtml(currentSlotCfg.title || '')}" class="acu-card-edit-input">
+                            <input type="text" id="slot-title" value="${currentSlotCfg.title || ''}" class="acu-card-edit-input">
                         </div>
 
                         <div>
                             <label style="font-weight:bold; display:block; margin-bottom:5px;">绑定表格</label>
                             <select id="slot-table" class="acu-nice-select" style="width:100%">
                                 <option value="" ${!activeTableName ? "selected" : ""}>-- 请选择 --</option>
-                                ${tableNames.map(n => `<option value="${escapeHtml(n)}" ${n === activeTableName ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+                                ${tableNames.map(n => `<option value="${n}" ${n === activeTableName ? 'selected' : ''}>${n}</option>`).join('')}
                             </select>
                         </div>
 
@@ -5094,31 +4950,31 @@ const checkRowChanged = (realIdx, row) => {
                             </select>
                         </div>
 
-                        <!-- 3. 卡片展示自定义设置 -->
+                        <!-- 3. 卡片展示自定义设�?-->
                         <div id="set-kv-area" style="display:none; flex-direction:column; gap:15px;">
                             <div>
                                 <label style="font-weight:bold; display:block; margin-bottom:5px;">选择卡片</label>
                                 <select id="slot-kv-card" class="acu-nice-select" style="width:100%"></select>
                             </div>
                             <div>
-                                <label style="font-weight:bold; display:block; margin-bottom:5px;">选择展示列 (多选)</label>
+                                <label style="font-weight:bold; display:block; margin-bottom:5px;">选择展示�?(多�?</label>
                                 <div id="slot-kv-cols" style="display:flex; flex-direction:column; gap:5px; max-height:150px; overflow-y:auto; background:var(--acu-input-bg); padding:5px; border-radius:4px; border:1px solid var(--acu-border);"></div>
                             </div>
                         </div>
 
-                        <!-- 4. 表格总览自定义设置 -->
+                        <!-- 4. 表格总览自定义设�?-->
                         <div id="set-cap-area" style="display:none; flex-direction:column; gap:15px;">
                             <div>
-                                <label style="font-weight:bold; display:block; margin-bottom:5px;">选择展示列</label>
+                                <label style="font-weight:bold; display:block; margin-bottom:5px;">选择展示�?/label>
                                 <select id="slot-cap-col" class="acu-nice-select" style="width:100%"></select>
                             </div>
                             <div>
                                 <label style="font-weight:bold; display:block; margin-bottom:5px;">卡槽列数</label>
                                 <select id="slot-cap-cols-count" class="acu-nice-select" style="width:100%">
                                     <option value="0">自动</option>
-                                    <option value="2">2列 (带图标)</option>
-                                    <option value="3">3列</option>
-                                    <option value="4">4列</option>
+                                    <option value="2">2�?(带图�?</option>
+                                    <option value="3">3�?/option>
+                                    <option value="4">4�?/option>
                                 </select>
                             </div>
                         </div>
@@ -5159,7 +5015,7 @@ const checkRowChanged = (realIdx, row) => {
             
             if (table.rows) {
                 table.rows.forEach(r => {
-                    const txt = r[1] || '未命名';
+                    const txt = r[1] || '未命�?;
                     const sel = (currentSlotCfg.card === txt) ? 'selected' : '';
                     $cardSel.append(`<option value="${escapeHtml(txt)}" ${sel}>${escapeHtml(txt)}</option>`);
                 });
@@ -5204,7 +5060,7 @@ const checkRowChanged = (realIdx, row) => {
             const val = $(this).val();
             if (val) {
                 let t = val;
-                if (t.endsWith('表')) t = t.slice(0, -1);
+                if (t.endsWith('�?)) t = t.slice(0, -1);
                 dialog.find('#slot-title').val(t);
             }
         });
@@ -5263,53 +5119,58 @@ const checkRowChanged = (realIdx, row) => {
         applyConfigStyles(getConfig());
         if (getConfig().debugMode) debugHook();
 
-        // 填表结束后前端"及时刷新"兜底：以"填表开始"信号驱动稳定轮询。
-        // DB 在填表开始时调 _notifyTableFillStart；轮询每 ~2s 比较 exportTableAsJson 指纹，
-        // 变化则刷新并重置稳定计数，连续 N 次无变化判定填表结束停止轮询。
-        // 不依赖固定延迟——填表 3 秒或 30 秒都能捕捉最终态；DB 主动 _notifyTableUpdate 仍即时刷新。
+        // 填表结束后前�?及时刷新"兜底：以"填表开�?信号驱动稳定轮询�?
+        // DB 在填表开始时�?_notifyTableFillStart；轮询每 ~2s 比较 exportTableAsJson 指纹�?
+        // 变化则刷新并重置稳定计数，连�?N 次无变化判定填表结束停止轮询�?
+        // 不依赖固定延迟——填�?3 秒或 30 秒都能捕捉最终态；DB 主动 _notifyTableUpdate 仍即时刷新�?
         const POLL_INTERVAL_MS = 2000;
         const POLL_STABLE_THRESHOLD = 3;   // 连续 3 次无变化 = 结束
-        const POLL_MAX_MS = 5 * 60 * 1000; // 5 分钟硬上限
+        const POLL_MAX_MS = 5 * 60 * 1000; // 5 分钟硬上�?
+        let fillPollTimer = null;
         let fillPollStable = 0;
         let fillPollStartedAt = 0;
         let fillPollLastFingerprint = null;
-        // fillPollTimer/stopFillPoll 已提升 IIFE 顶层(与 catchupPoll 双向互斥)
+
+        // 轻量指纹/inEditingContext 复用顶层定义（见 IIFE 顶层），避免兄弟闭包重复定义�?
+        const stopFillPoll = () => { if (fillPollTimer) { clearInterval(fillPollTimer); fillPollTimer = null; } };
 
         const startFillPoll = () => {
-            // 追平轮询在跑时不要再起填表轮询：两者各自 1.5s / 2s 独立触发
+            // 追平轮询在跑时不要再起填表轮询：两者各�?1.5s / 2s 独立触发
             // renderInterface(true)，叠起来接近每秒 1.2 次全量重建，正好砸在
-            // 系统最忙的时候。追平结束本身就会强制刷新一次，不会漏数据。
+            // 系统最忙的时候。追平结束本身就会强制刷新一次，不会漏数据�?
             if (catchupTimer) return;
             stopFillPoll();
             fillPollStable = 0;
             fillPollStartedAt = Date.now();
             fillPollLastFingerprint = null;
             const api = getCore().getDB();
-            // 首 tick 前先同步采样基线，避免把"填表刚开始还没写"误判为稳定而提前结束
+            // �?tick 前先同步采样基线，避免把"填表刚开始还没写"误判为稳定而提前结�?
             try {
                 if (api && typeof api.exportTableAsJson === 'function') {
                     fillPollLastFingerprint = lightFingerprint(api.exportTableAsJson());
                 }
-            } catch (_) { /* 采样失败，下一 tick 补基线 */ }
+            } catch (_) { /* 采样失败，下一 tick 补基�?*/ }
             fillPollTimer = setInterval(() => {
-                // 硬上限必须排在编辑态之前判：反过来的话，用户开着单元格菜单/详情弹窗
-                // 走开，inEditingContext 会一直 return，POLL_MAX_MS 永远评估不到，
-                // 这个 interval 就每 2s 空转到天荒地老（追平轮询那边顺序是对的）。
+                // 硬上限必须排在编辑态之前判：反过来的话，用户开着单元格菜�?详情弹窗
+                // 走开，inEditingContext 会一�?return，POLL_MAX_MS 永远评估不到�?
+                // 这个 interval 就每 2s 空转到天荒地老（追平轮询那边顺序是对的）�?
                 if (Date.now() - fillPollStartedAt > POLL_MAX_MS) { stopFillPoll(); return; }
                 if (inEditingContext()) return; // 用户编辑中不打扰
                 if (!api || typeof api.exportTableAsJson !== 'function') { stopFillPoll(); return; }
-                // 先取轻量指纹判断是否变化；只有变化才 clone 全表（避免每次都深拷贝）。
-                // N-02 已统一全列采样：lightFingerprint 与 sheetFingerprints 一致消除宽表盲区。
+                // 先取轻量指纹判断是否变化；只有变化才 clone 全表（避免每次都深拷贝）�?
+                // �?R-1):lightFingerprint 采前 6 列�?cloneTableDataPartial �?sheetFingerprints
+                // 全列——范围不一致是故意�?轮询�?1.5-2s �?全列会带来每 tick 全表扫描开销;
+                // �?7+ 列修改由 DB �?updateCell 通知 �?handleUpdate 全量重拉兜底�?
                 let rawRef = null;
                 try { rawRef = api.exportTableAsJson(); } catch (_) { rawRef = null; }
                 const fp = lightFingerprint(rawRef);
                 if (fillPollLastFingerprint !== null && fp !== fillPollLastFingerprint) {
-                    // 数据变了：填表仍在进行或有新写入 → 失效引用缓存并强制刷新。
-                    // 不在此 clone：renderInterface(true) 内部 getTableData(true) 会统一 clone 一次，
-                    // 避免轮询 clone + 渲染 clone 双份全表深拷贝。
+                    // 数据变了：填表仍在进行或有新写入 �?失效引用缓存并强制刷新�?
+                    // 不在�?clone：renderInterface(true) 内部 getTableData(true) 会统一 clone 一次，
+                    // 避免轮询 clone + 渲染 clone 双份全表深拷贝�?
                     fillPollStable = 0;
-                    // 保留 cachedTableData:getTableData(true) 内 cloneTableDataPartial 按表克隆,
-                    // 只深拷贝变化的 sheet(性能审查 P1-1),填表期免全表 8.3MB 深拷贝。
+                    // 保留 cachedTableData:getTableData(true) �?cloneTableDataPartial 按表克隆,
+                    // 只深拷贝变化�?sheet(性能审查 P1-1),填表期免全表 8.3MB 深拷贝�?
                     lastRawTableRef = null;
                     lastTableSetFingerprint = '';
                     lastTableDataRefreshed = true;
@@ -5317,8 +5178,8 @@ const checkRowChanged = (realIdx, row) => {
                 } else {
                     fillPollStable++;
                     if (fillPollStable >= POLL_STABLE_THRESHOLD) {
-                        // 填表结束：把当前态存为新基线快照，让 diffMap 在下次刷新时不再把
-                        // 已追平的行标记为"变化"高亮（否则会一直亮到下次填表或手动刷新）。
+                        // 填表结束：把当前态存为新基线快照，让 diffMap 在下次刷新时不再�?
+                        // 已追平的行标记为"变化"高亮（否则会一直亮到下次填表或手动刷新）�?
                         try { if (rawRef) saveSnapshot(cloneTableData(rawRef)); } catch (_) {}
                         stopFillPoll();
                         return;
@@ -5336,7 +5197,7 @@ const checkRowChanged = (realIdx, row) => {
                  if (api.registerTableUpdateCallback) {
                      api.registerTableUpdateCallback(UpdateController.handleUpdate);
                      if (api.registerTableFillStartCallback) {
-                         // 填表开始：存一份快照 + 启动稳定轮询（填表跑完自动兜底刷新）
+                         // 填表开始：存一份快�?+ 启动稳定轮询（填表跑完自动兜底刷新）
                          api.registerTableFillStartCallback(() => {
                              try { const c = api.exportTableAsJson(); if (c) saveSnapshot(c); } catch (_) {}
                              startFillPoll();
@@ -5346,8 +5207,8 @@ const checkRowChanged = (realIdx, row) => {
                  isInitialized = true;
                  // 修复串表：cachedTableData 是前端侧的深拷贝缓存，DB 内部 currentJsonTableData_ACU
                  // 在切换聊天时会被替换为新聊天的数据，但前端缓存不会自动失效；renderInterface(false)
-                 // 走缓存路径，会把旧聊天的表显示到新聊天里。
-                 // 订阅 ST 的 CHAT_CHANGED 事件，命中时清缓存 + 丢快照 + 强制刷新，杜绝跨聊天串表。
+                 // 走缓存路径，会把旧聊天的表显示到新聊天里�?
+                 // 订阅 ST �?CHAT_CHANGED 事件，命中时清缓�?+ 丢快�?+ 强制刷新，杜绝跨聊天串表�?
                  try {
                      const w = window.parent || window;
                      const ST = w.SillyTavern || window.SillyTavern;
@@ -5356,7 +5217,7 @@ const checkRowChanged = (realIdx, row) => {
                      if (evSrc && typeof evSrc.on === 'function' && evTypes && evTypes.CHAT_CHANGED) {
                          evSrc.on(evTypes.CHAT_CHANGED, () => {
                              stopFillPoll();
-                             stopCatchupPoll(); // 切聊天停掉旧追平轮询，防跨聊天误刷新/误 toast
+                             stopCatchupPoll(); // 切聊天停掉旧追平轮询，防跨聊天误刷新/�?toast
                              cachedTableData = null;
                              lastRawTableRef = null;
                              lastTableSetFingerprint = '';
