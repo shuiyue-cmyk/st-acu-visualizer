@@ -32,8 +32,17 @@
     let isSaving = false;
     let isEditingOrder = false;
     let currentDiffMap = new Set();
+    // H-02 事件委托化状态
+    let bindEventsDelegated = false;
+    let latestTablesRef = null;
     let observer = null;
     let columnResizeObserver = null;
+    // H-05 Observer 单例化：三重监听的单例状态与 rAF 合并 flag 提升至模块级，避免每帧 disconnect/new
+    let chatObsRafPending = false;
+    let chatResizeRafPending = false;
+    let chatRoRafPending = false;
+    let chatObserversReady = false;
+    let lastObservedChatEl = null;
     let isCollapsed = (() => { try { return localStorage.getItem(STORAGE_KEY_UI_COLLAPSE) === 'true'; } catch (e) { return false; } })();
     let globalScrollTop = 0;
     let currentPage = 1;
@@ -285,12 +294,19 @@
         if (!$els || !$els.length) return;
         $els.each(function() {
             const $t = $(this);
-            $t.off('scroll.fade').on('scroll.fade', function() {
-                $t.addClass('acu-show-scroll');
-                clearTimeout($t.data('fadeT'));
-                $t.data('fadeT', setTimeout(() => {
-                    $t.removeClass('acu-show-scroll');
-                }, 500));
+            // M-08 passive:true + rAF 节流：scroll 高频触发，passive 避免阻塞主线程，rAF 合并样式写
+            let rafPending = false;
+            $t.off('scroll.fade').on('scroll.fade', { passive: true }, function() {
+                if (rafPending) return;
+                rafPending = true;
+                requestAnimationFrame(() => {
+                    rafPending = false;
+                    $t.addClass('acu-show-scroll');
+                    clearTimeout($t.data('fadeT'));
+                    $t.data('fadeT', setTimeout(() => {
+                        $t.removeClass('acu-show-scroll');
+                    }, 500));
+                });
             });
         });
     };
@@ -326,10 +342,10 @@
 
     const getActiveTabState = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_ACTIVE_TAB)); } catch (e) { return null; } };
     const saveActiveTabState = (tableName) => { try { localStorage.setItem(STORAGE_KEY_ACTIVE_TAB, JSON.stringify(tableName)); } catch (e) { console.error(e); } };
-    const getSavedTableOrder = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_ORDER)); } catch (e) { return null; } };
-    const saveTableOrder = (tableNames) => { try { localStorage.setItem(STORAGE_KEY_TABLE_ORDER, JSON.stringify(tableNames)); } catch (e) { console.error(e); } };
-    const getSavedActionOrder = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_ACTION_ORDER)); } catch (e) { return null; } };
-    const saveActionOrder = (list) => { try { localStorage.setItem(STORAGE_KEY_ACTION_ORDER, JSON.stringify(list)); } catch (e) { console.error(e); } };
+    const getSavedTableOrder = () => { if (savedTableOrderCache !== null) return savedTableOrderCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_ORDER)); savedTableOrderCache = v; return v; } catch (e) { return null; } };
+    const saveTableOrder = (tableNames) => { savedTableOrderCache = tableNames ? [...tableNames] : tableNames; try { localStorage.setItem(STORAGE_KEY_TABLE_ORDER, JSON.stringify(tableNames)); } catch (e) { console.error(e); } };
+    const getSavedActionOrder = () => { if (savedActionOrderCache !== null) return savedActionOrderCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_ACTION_ORDER)); savedActionOrderCache = v; return v; } catch (e) { return null; } };
+    const saveActionOrder = (list) => { savedActionOrderCache = list ? [...list] : list; try { localStorage.setItem(STORAGE_KEY_ACTION_ORDER, JSON.stringify(list)); } catch (e) { console.error(e); } };
     // 性能审查 P3-2:配置内存缓存——一次渲染内 getConfig 被调 8+ 次,避免每次都 JSON.parse;
     // 缓存的是解析后的原始对象,getConfig 每次仍浅拷贝展开(DEFAULT_CONFIG + saved)防止脏写。
     let configCache = null;
@@ -363,13 +379,20 @@
     };
     const saveConfig = (newConfig) => { const current = getConfig(); const merged = { ...current, ...newConfig }; try { localStorage.setItem(STORAGE_KEY_UI_CONFIG, JSON.stringify(merged)); } catch (e) { console.error(e); } configCache = null; applyConfigStyles(merged); };
     
-    const getTableHeights = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_HEIGHTS)) || {}; } catch (e) { return {}; } };
-    const saveTableHeights = (heights) => { try { localStorage.setItem(STORAGE_KEY_TABLE_HEIGHTS, JSON.stringify(heights)); } catch (e) { console.error(e); } };
-
-    const getTableStyles = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_STYLES)) || {}; } catch (e) { return {}; } };
-    const saveTableStyles = (styles) => { try { localStorage.setItem(STORAGE_KEY_TABLE_STYLES, JSON.stringify(styles)); } catch (e) { console.error(e); } };
-    const getDashConfig = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_DASH_CONFIG)) || {}; } catch (e) { return {}; } };
-    const saveDashConfig = (cfg) => { try { localStorage.setItem(STORAGE_KEY_DASH_CONFIG, JSON.stringify(cfg)); } catch (e) { console.error(e); } };
+    // M-03 存储缓存补齐：仿 getConfig:335 的 configCache 模式，内存缓存 + save 时失效，消除每 render 5-6 次 JSON.parse
+    let tableHeightsCache = null;
+    let tableStylesCache = null;
+    let dashConfigCache = null;
+    let hiddenTablesCache = null;
+    let savedTableOrderCache = null;
+    let savedActionOrderCache = null;
+    let reverseTablesCache = null;
+    const getTableHeights = () => { if (tableHeightsCache !== null) return tableHeightsCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_HEIGHTS)) || {}; tableHeightsCache = v; return v; } catch (e) { return {}; } };
+    const saveTableHeights = (heights) => { tableHeightsCache = heights ? { ...heights } : null; try { localStorage.setItem(STORAGE_KEY_TABLE_HEIGHTS, JSON.stringify(heights)); } catch (e) { console.error(e); } };
+    const getTableStyles = () => { if (tableStylesCache !== null) return tableStylesCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_TABLE_STYLES)) || {}; tableStylesCache = v; return v; } catch (e) { return {}; } };
+    const saveTableStyles = (styles) => { tableStylesCache = styles ? { ...styles } : null; try { localStorage.setItem(STORAGE_KEY_TABLE_STYLES, JSON.stringify(styles)); } catch (e) { console.error(e); } };
+    const getDashConfig = () => { if (dashConfigCache !== null) return dashConfigCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_DASH_CONFIG)) || {}; dashConfigCache = v; return v; } catch (e) { return {}; } };
+    const saveDashConfig = (cfg) => { dashConfigCache = cfg ? { ...cfg } : null; try { localStorage.setItem(STORAGE_KEY_DASH_CONFIG, JSON.stringify(cfg)); } catch (e) { console.error(e); } };
 
     // ── 调试报告采集(T29):用户遇可复现问题可开「调试模式」→ 复现 → 生成报告 →
     //    打开 GitHub 预填 issue 页提交(无 token,数据只在用户浏览器与 GitHub 间流转)。
@@ -465,11 +488,24 @@
     };
 
 
-    const getReverseOrderTables = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_REVERSE_TABLES)) || []; } catch (e) { return []; } };
-    const saveReverseOrderTables = (list) => { try { localStorage.setItem(STORAGE_KEY_REVERSE_TABLES, JSON.stringify(list)); } catch (e) { console.error(e); } };
-
-    const getHiddenTables = () => { try { return JSON.parse(localStorage.getItem(STORAGE_KEY_HIDDEN_TABLES)) || []; } catch (e) { return []; } };
-    const saveHiddenTables = (list) => { try { localStorage.setItem(STORAGE_KEY_HIDDEN_TABLES, JSON.stringify(list)); } catch (e) { console.error(e); } };
+    const getReverseOrderTables = () => { if (reverseTablesCache !== null) return reverseTablesCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_REVERSE_TABLES)) || []; reverseTablesCache = v; return v; } catch (e) { return []; } };
+    const saveReverseOrderTables = (list) => { reverseTablesCache = list ? [...list] : list; try { localStorage.setItem(STORAGE_KEY_REVERSE_TABLES, JSON.stringify(list)); } catch (e) { console.error(e); } };
+    const getHiddenTables = () => { if (hiddenTablesCache !== null) return hiddenTablesCache; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_HIDDEN_TABLES)) || []; hiddenTablesCache = v; return v; } catch (e) { return []; } };
+    const saveHiddenTables = (list) => { hiddenTablesCache = list ? [...list] : list; try { localStorage.setItem(STORAGE_KEY_HIDDEN_TABLES, JSON.stringify(list)); } catch (e) { console.error(e); } };
+    // M-03 storage 事件同步：跨 tab 修改时失效对应缓存
+    try {
+        window.addEventListener('storage', (e) => {
+            if (!e || !e.key) return;
+            if (e.key === STORAGE_KEY_UI_CONFIG) configCache = null;
+            else if (e.key === STORAGE_KEY_TABLE_HEIGHTS) tableHeightsCache = null;
+            else if (e.key === STORAGE_KEY_TABLE_STYLES) tableStylesCache = null;
+            else if (e.key === STORAGE_KEY_DASH_CONFIG) dashConfigCache = null;
+            else if (e.key === STORAGE_KEY_HIDDEN_TABLES) hiddenTablesCache = null;
+            else if (e.key === STORAGE_KEY_TABLE_ORDER) savedTableOrderCache = null;
+            else if (e.key === STORAGE_KEY_ACTION_ORDER) savedActionOrderCache = null;
+            else if (e.key === STORAGE_KEY_REVERSE_TABLES) reverseTablesCache = null;
+        });
+    } catch (_) {}
 
     // 高楼层/大数据量下 localStorage 5MB 配额极易打满（纪要表尤甚）。
     // 内存快照优先；localStorage 仅作冷启动兜底，写入失败静默降级。
@@ -765,6 +801,14 @@
     const addStyles = () => {
         const { $ } = getCore();
         if (!$) return;
+        // M-02 非阻塞字体加载：@import 会阻塞首绘，改用 <link> 异步加载 + font-display:swap
+        if (!document.getElementById(`${SCRIPT_ID}-font-link`)) {
+            const lk = document.createElement('link');
+            lk.id = `${SCRIPT_ID}-font-link`;
+            lk.rel = 'stylesheet';
+            lk.href = 'https://fonts.loli.net/css2?family=Long+Cang&family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@400;700&family=Noto+Serif+SC:wght@400;700&family=ZCOOL+KuaiLe&family=Zhi+Mang+Xing&display=swap';
+            document.head.appendChild(lk);
+        }
         $(`#${SCRIPT_ID}-styles`).remove();
         let themeCss = '';
         Object.keys(THEME_VARS).forEach(k => {
@@ -774,8 +818,7 @@
 
         const styles = `
             <style id="${SCRIPT_ID}-styles">
-                /* 国内镜像字体源，无需VPN */
-                @import url('https://fonts.loli.net/css2?family=Long+Cang&family=Ma+Shan+Zheng&family=Noto+Sans+SC:wght@400;700&family=Noto+Serif+SC:wght@400;700&family=ZCOOL+KuaiLe&family=Zhi+Mang+Xing&display=swap');
+                /* 字体已由上方 <link> 非阻塞加载，此处不再 @import */
 
                 /* 选项面板容器：脱离父级（ST 消息块 .mes_block）的 flex/对齐影响，避免窄屏/平板上被右靠。
                    注意：display 不加 !important，否则会压掉 jQuery .hide() 的内联 display:none（发送后隐藏面板）。 */
@@ -1567,24 +1610,20 @@
                 const s = data[k];
                 if (!s || !Array.isArray(s.content) || s.content.length === 0) { out += k + ':0;'; continue; }
                 out += k + ':' + s.content.length + ';';
-                // 均匀采样约 40 行覆盖全表(步长随行数缩放),消除中间行盲区
-                // (追平补历史空洞会写中间行,固定前 20 行采样会漏检致提前判稳定)。
-                const COLS_SCAN = 6;
+                // N-02 列采样一致性：与 sheetFingerprints 统一全列采样，消除宽表第7+列盲区（开销+30%可接受）
                 const n = s.content.length;
                 const step = Math.max(1, Math.ceil(n / 40));
                 for (let r = 0; r < n; r += step) {
                     const row = s.content[r];
                     if (Array.isArray(row)) {
-                        const cl = Math.min(row.length, COLS_SCAN);
-                        for (let cc = 0; cc < cl; cc++) out += (row[cc] ?? '') + '|';
+                        for (let cc = 0; cc < row.length; cc++) out += (row[cc] ?? '') + '|';
                     }
                     out += ';';
                 }
                 // 末行全列（补最新楼层写入；若末行已被采样，此处重复但确定性一致）
                 const last = s.content[n - 1];
                 if (Array.isArray(last)) {
-                    const cl = Math.min(last.length, COLS_SCAN);
-                    for (let cc = 0; cc < cl; cc++) out += (last[cc] ?? '') + '|';
+                    for (let cc = 0; cc < last.length; cc++) out += (last[cc] ?? '') + '|';
                 }
                 out += ';';
             }
@@ -3517,15 +3556,82 @@ ${allTableNames.map(tName => {
         for (const p of plans) applyPanelAlignment(p);
     };
 
+    // H-05 单例 handleChatMutation：提升至模块级，rAF 合并复用
+    const handleChatMutation = () => {
+        if (chatObsRafPending) return;
+        chatObsRafPending = true;
+        requestAnimationFrame(() => {
+            chatObsRafPending = false;
+            const currentConfig = getConfig();
+            const $chatNode = $('#chat');
+            const $wrapper = $('.acu-wrapper');
+            if (!$chatNode.length || !$wrapper.length) return;
+            if (currentConfig.frontendPosition === 'message') {
+                const $lastMes = $chatNode.find('.mes').last();
+                if ($lastMes.length) {
+                    const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
+                    if (!$targetBlock.find('.acu-wrapper').length) {
+                        $targetBlock.append($wrapper);
+                    } else if ($targetBlock.children().last()[0] !== $wrapper[0]) {
+                        $targetBlock.append($wrapper);
+                    }
+                    alignWrapperToMessageColumnNow();
+                }
+            } else {
+                const children = $chatNode.children();
+                const lastChild = children.last()[0];
+                if (lastChild && lastChild !== $wrapper[0]) {
+                    if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
+                        $chatNode.append($wrapper);
+                    }
+                }
+                alignWrapperToMessageColumnNow();
+            }
+        });
+    };
+    // H-05 单例初始化：三重监听仅首次创建，后续仅更新观察目标
+    const ensureChatObservers = ($chat) => {
+        if (chatObserversReady) {
+            // 仅更新观察目标，避免每帧 disconnect/new
+            if ($chat && $chat.length && $chat[0] !== lastObservedChatEl) {
+                try { if (observer) observer.disconnect(); } catch (_) {}
+                try { observer.observe($chat[0], { childList: true }); lastObservedChatEl = $chat[0]; } catch (_) {}
+                try { if (columnResizeObserver) { columnResizeObserver.disconnect(); columnResizeObserver.observe($chat[0]); } } catch (_) {}
+            }
+            return;
+        }
+        observer = new MutationObserver(handleChatMutation);
+        $(window).off('resize.acu_align').on('resize.acu_align', () => {
+            if (chatResizeRafPending) return;
+            chatResizeRafPending = true;
+            requestAnimationFrame(() => {
+                chatResizeRafPending = false;
+                alignWrapperToMessageColumnNow();
+            });
+        });
+        if (typeof ResizeObserver !== 'undefined') {
+            columnResizeObserver = new ResizeObserver(() => {
+                if (chatRoRafPending) return;
+                chatRoRafPending = true;
+                requestAnimationFrame(() => {
+                    chatRoRafPending = false;
+                    alignWrapperToMessageColumnNow();
+                });
+            });
+        }
+        chatObserversReady = true;
+        if ($chat && $chat.length) {
+            try { observer.observe($chat[0], { childList: true }); lastObservedChatEl = $chat[0]; } catch (_) {}
+            if (columnResizeObserver) { try { columnResizeObserver.observe($chat[0]); } catch (_) {} }
+        }
+    };
+
     const insertHtmlToPage = (html) => {
         const { $ } = getCore();
         const $chat = $('#chat');
         const config = getConfig();
-        
         $('.acu-wrapper').remove();
-        
         const $newContent = $(html);
-        
         if (config.frontendPosition === 'message') {
              const $lastMes = $chat.find('.mes').last();
              if ($lastMes.length) {
@@ -3539,80 +3645,8 @@ ${allTableNames.map(tName => {
             if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
             alignWrapperToMessageColumn();
         }
-
-        // 优化：去掉 subtree 监听，只观察 #chat 直接子级增删（新 .mes 是 #chat 直接子元素）。
-        // 原 subtree:true 会监听消息内部深层渲染（swipe/代码块展开等）触发大量无意义回调。
-        // 再加节流：批量增删时只处理最后一次，避免高频 jQuery 查找。
-        let obsRafPending = false;
-        const handleChatMutation = () => {
-            if (obsRafPending) return;
-            obsRafPending = true;
-            requestAnimationFrame(() => {
-                obsRafPending = false;
-                const currentConfig = getConfig();
-                const $chatNode = $('#chat');
-                const $wrapper = $('.acu-wrapper');
-                if (!$chatNode.length || !$wrapper.length) return;
-                if (currentConfig.frontendPosition === 'message') {
-                    const $lastMes = $chatNode.find('.mes').last();
-                    if ($lastMes.length) {
-                        const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
-                        if (!$targetBlock.find('.acu-wrapper').length) {
-                            $targetBlock.append($wrapper);
-                        } else if ($targetBlock.children().last()[0] !== $wrapper[0]) {
-                            $targetBlock.append($wrapper);
-                        }
-                        alignWrapperToMessageColumnNow(); // 已在 rAF 内，直调免再延一帧
-                    }
-                } else {
-                    const children = $chatNode.children();
-                    const lastChild = children.last()[0];
-                    if (lastChild && lastChild !== $wrapper[0]) {
-                        if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
-                            $chatNode.append($wrapper);
-                        }
-                    }
-                    // 消息增删后重新对齐面板到正文列
-                    alignWrapperToMessageColumnNow(); // 已在 rAF 内，直调免再延一帧
-                }
-            });
-        };
-        if (observer) observer.disconnect();
-        observer = new MutationObserver(handleChatMutation);
-
-        // 窗口 resize / 转屏后消息列宽度变化，复用对齐逻辑防重新贴边。
-        // rAF 合并，避免转屏/软键盘的 resize 风暴里反复强制布局。
-        let resizeRafPending = false;
-        $(window).off('resize.acu_align').on('resize.acu_align', () => {
-            if (resizeRafPending) return;
-            resizeRafPending = true;
-            requestAnimationFrame(() => {
-                resizeRafPending = false;
-                alignWrapperToMessageColumnNow(); // 已在 rAF 内，直调免再延一帧
-            });
-        });
-
-        // ST 的「聊天宽度」滑块改的是 --sheldWidth，既不触发 window resize
-        // 也不动 #chat 的直接子级，光靠上面两个监听会让面板卡在旧的像素宽度。
-        // 直接观察 #chat 尺寸变化补上这一类。
-        if (columnResizeObserver) { columnResizeObserver.disconnect(); columnResizeObserver = null; }
-        if ($chat.length && typeof ResizeObserver !== 'undefined') {
-            let roRafPending = false;
-            columnResizeObserver = new ResizeObserver(() => {
-                if (roRafPending) return;
-                roRafPending = true;
-                requestAnimationFrame(() => {
-                    roRafPending = false;
-                    alignWrapperToMessageColumnNow(); // 已在 rAF 内，直调免再延一帧
-                });
-            });
-            columnResizeObserver.observe($chat[0]);
-        }
-
-        if ($chat.length) {
-            // 只观察直接子级增删；消息内部渲染不再触发
-            observer.observe($chat[0], { childList: true });
-        }
+        // H-05 单例：首次创建三监听，后续仅更新目标，避免每帧 disconnect/new 开销
+        ensureChatObservers($chat);
     };
 
     const renderTableContent = (tableData, tableName) => {
@@ -3865,6 +3899,106 @@ const checkRowChanged = (realIdx, row) => {
 
     const bindEvents = (tables) => {
         const { $ } = getCore();
+        latestTablesRef = tables;
+        // H-02 事件委托化：容器级单例，仅首次绑定，后续 render 仅更新 latestTablesRef，不再全量 querySelectorAll+off/on
+        if (!bindEventsDelegated) {
+            bindEventsDelegated = true;
+            // #acu-nav-bar 委托：tab 切换
+            $(document).on('click.acu_delegated_nav', '#acu-nav-bar .acu-nav-btn', function(e) {
+                e.stopPropagation();
+                if (isEditingOrder) return;
+                const tableName = $(this).data('table');
+                if ($(this).hasClass('active')) { closePanel(); } else {
+                    // 复用 switchTab 逻辑（需闭包 tables，故此处内联）
+                    isMultiSelectMode = false; selectedRows.clear(); pendingDeletes.clear();
+                    currentPage = 1; currentSearchTerm = ''; globalScrollTop = 0;
+                    if (tableName === TAB_DASHBOARD) {
+                        $('#acu-data-area').html(renderDashboard(latestTablesRef)).addClass('visible');
+                        const h = getTableHeights()[TAB_DASHBOARD]; $('#acu-data-area').css({height: h ? h + 'px' : '60vh', maxHeight: '95vh'});
+                    } else if (latestTablesRef && latestTablesRef[tableName]) {
+                        $('#acu-data-area').html(renderTableContent(latestTablesRef[tableName], tableName)).addClass('visible');
+                        const h = getTableHeights()[tableName]; $('#acu-data-area').css({height: h ? h + 'px' : '60vh', maxHeight: '95vh'});
+                    }
+                    $('.acu-nav-btn').removeClass('active');
+                    $(`.acu-nav-btn[data-table="${CSS.escape(tableName)}"]`).addClass('active');
+                    saveActiveTabState(tableName);
+                    // 委托路径仍需补绑 ID 级按钮与滚动淡入（热路径已委托，ID 按钮仍 per-render）
+                    try { if (typeof bindDataAreaEvents === 'function') bindDataAreaEvents(); } catch(_) {}
+                    try { bindScrollFade($('.acu-panel-content, .acu-dash-container, .acu-dash-npc-grid')); } catch(_) {}
+                    try { if (typeof updateDynamicActionButton === 'function') updateDynamicActionButton(); } catch(_) {}
+                }
+            });
+            // #acu-data-area 单容器委托：acu-cell / dash-interactive / tab-btn / page-btn / card 统一分发
+            $(document).on('click.acu_delegated_area', '#acu-data-area', function(e) {
+                const t = e.target;
+                const cell = t.closest('.acu-cell');
+                if (cell) { if(isMultiSelectMode) return; e.stopPropagation(); showCellMenu(e, cell); return; }
+                const dash = t.closest('.acu-dash-interactive');
+                if (dash) {
+                    e.stopPropagation();
+                    const tableName = dash.getAttribute('data-tname') || $(dash).data('tname');
+                    const rowIdx = parseInt(dash.getAttribute('data-row')); const colIdx = parseInt(dash.getAttribute('data-col'));
+                    if (tableName && latestTablesRef && latestTablesRef[tableName]) {
+                        const table = latestTablesRef[tableName]; const row = table.rows[rowIdx];
+                        if (row) showQuickView(row, table.headers, tableName, colIdx);
+                    }
+                    return;
+                }
+                const tabBtn = t.closest('.acu-tab-btn');
+                if (tabBtn) {
+                    e.stopPropagation();
+                    const $container = $(tabBtn).closest('.acu-dash-card');
+                    const index = $(tabBtn).index();
+                    $container.find('.acu-tab-btn').removeClass('active'); $(tabBtn).addClass('active');
+                    const $panes = $container.find('.acu-tab-pane'); $panes.removeClass('active');
+                    if ($panes.length > index) $panes.eq(index).addClass('active');
+                    return;
+                }
+                const pageBtn = t.closest('.acu-page-btn');
+                if (pageBtn) {
+                    e.stopPropagation();
+                    const $pb = $(pageBtn);
+                    if ($pb.hasClass('disabled') || $pb.attr('disabled') || $pb.hasClass('active')) return;
+                    const p = parseInt($pb.data('page')); if (!p) return;
+                    currentPage = p; globalScrollTop = 0;
+                    const tn = $('.acu-nav-btn.active').data('table');
+                    if (tn && latestTablesRef && latestTablesRef[tn]) {
+                        $('#acu-data-area').html(renderTableContent(latestTablesRef[tn], tn));
+                    }
+                    return;
+                }
+                const card = t.closest('.acu-data-card');
+                if (card && isMultiSelectMode) {
+                    if (!e.target.closest('.acu-card-checkbox')) {
+                        const $cb = $(card).find('.acu-card-checkbox');
+                        $cb.prop('checked', !$cb.prop('checked')).trigger('change');
+                    }
+                }
+            });
+            // change 委托（checkbox）
+            $(document).on('change.acu_delegated_area', '#acu-data-area .acu-card-checkbox', function(e) {
+                e.stopPropagation();
+                const rowKey = $(this).data('row-key');
+                const tableName = $('.acu-nav-btn.active').data('table');
+                const $card = $(this).closest('.acu-data-card');
+                const rowIndex = parseInt($card.find('.acu-editable-title').data('row'));
+                const key = $card.find('.acu-editable-title').data('key');
+                const delKey = `${tableName}-row-${rowIndex}`;
+                if ($(this).is(':checked')) {
+                    selectedRows.set(rowKey, { tableName, rowIndex, key });
+                    $card.addClass('acu-card-selected'); pendingDeletes.add(delKey);
+                    if ($card.find('.acu-badge-pending').length === 0) $card.prepend('<div class="acu-badge-pending">待删除</div>');
+                } else {
+                    selectedRows.delete(rowKey); $card.removeClass('acu-card-selected'); pendingDeletes.delete(delKey);
+                    $card.find('.acu-badge-pending').remove();
+                }
+                const selectedCount = Array.from(selectedRows.values()).filter(s => s.tableName === tableName).length;
+                const isBatchMode = isMultiSelectMode && selectedCount > 0;
+                const $title = $('.acu-panel-title'); $title.find('span[style*="margin-left:10px"]').remove();
+                if (isBatchMode) $title.append(`<span style="margin-left:10px; font-size:12px; color:var(--acu-highlight); background:var(--acu-highlight-bg); padding:2px 8px; border-radius:4px;">已选 ${selectedCount}</span>`);
+                updateDynamicActionButton();
+            });
+        }
         const stopSelectors = '.acu-data-display, .acu-nav-container, .acu-wrapper, .acu-edit-overlay, .acu-quick-view-overlay, .acu-cell-menu';
         $('body').off('wheel touchstart touchmove touchend click', stopSelectors).on('wheel touchstart touchmove touchend click', stopSelectors, function(e) {
             e.stopPropagation();
@@ -3917,14 +4051,16 @@ const checkRowChanged = (realIdx, row) => {
             // 绑定，所以只是纯浪费不是泄漏）。删掉。
           };
 
-        $('.acu-nav-btn').off('click').on('click', function(e) {
+        if (!bindEventsDelegated) { $('.acu-nav-btn').off('click').on('click', function(e) {
             e.stopPropagation(); 
             if (isEditingOrder) return;
             const tableName = $(this).data('table');
             if ($(this).hasClass('active')) { closePanel(); } else { switchTab(tableName); }
-        });
+        }); }
         
+        // H-02 委托已接管热路径时，旧的每格 off/on 不再执行（保留注释待删，兼容期可回滚）
         const bindDynamicContentEvents = () => {
+            if (bindEventsDelegated) return;
             $('.acu-cell').off('click').on('click', function(e) { if(isMultiSelectMode) return; e.stopPropagation(); showCellMenu(e, this); });
              $('.acu-dash-interactive').off('click').on('click', function(e) {
                 e.stopPropagation();
@@ -3938,13 +4074,10 @@ const checkRowChanged = (realIdx, row) => {
             });
             $('.acu-tab-btn').off('click').on('click', function(e) {
                  e.stopPropagation();
-
                  const $container = $(this).closest('.acu-dash-card');
                  const index = $(this).index(); 
-
                  $container.find('.acu-tab-btn').removeClass('active');
                  $(this).addClass('active');
-
                  const $panes = $container.find('.acu-tab-pane');
                  $panes.removeClass('active');
                  if ($panes.length > index) {
@@ -3998,15 +4131,15 @@ const checkRowChanged = (realIdx, row) => {
                 }
             });
 
-            $('.acu-data-card').off('click').on('click', function(e) {
+            if (!bindEventsDelegated) { $('.acu-data-card').off('click').on('click', function(e) {
                 if (isMultiSelectMode) {
                     if (!$(e.target).is('.acu-card-checkbox')) {
                         const $cb = $(this).find('.acu-card-checkbox');
                         $cb.prop('checked', !$cb.prop('checked')).trigger('change');
                     }
                 }
-            });
-            $('.acu-card-checkbox').off('change').on('change', function(e) {
+            }); }
+            if (!bindEventsDelegated) { $('.acu-card-checkbox').off('change').on('change', function(e) {
                 e.stopPropagation();
                 const rowKey = $(this).data('row-key');
                 const tableName = $('.acu-nav-btn.active').data('table');
@@ -4041,7 +4174,7 @@ const checkRowChanged = (realIdx, row) => {
                 }
 
                 updateDynamicActionButton();
-            });
+            }); }
 
             $('#acu-btn-search-toggle').off('click').on('click', function(e) {
                 e.stopPropagation();
@@ -5166,9 +5299,7 @@ const checkRowChanged = (realIdx, row) => {
                 if (inEditingContext()) return; // 用户编辑中不打扰
                 if (!api || typeof api.exportTableAsJson !== 'function') { stopFillPoll(); return; }
                 // 先取轻量指纹判断是否变化；只有变化才 clone 全表（避免每次都深拷贝）。
-                // 注(R-1):lightFingerprint 采前 6 列而 cloneTableDataPartial 用 sheetFingerprints
-                // 全列——范围不一致是故意的:轮询每 1.5-2s 跑,全列会带来每 tick 全表扫描开销;
-                // 第 7+ 列修改由 DB 的 updateCell 通知 → handleUpdate 全量重拉兜底。
+                // N-02 已统一全列采样：lightFingerprint 与 sheetFingerprints 一致消除宽表盲区。
                 let rawRef = null;
                 try { rawRef = api.exportTableAsJson(); } catch (_) { rawRef = null; }
                 const fp = lightFingerprint(rawRef);
