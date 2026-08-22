@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.3'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.4'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -2568,12 +2568,15 @@ ${allTableNames.map(tName => {
         dialog.find('#btn-gen-debug-report').on('click', function() {
             const wasOn = getConfig().debugMode;
             if (!wasOn) debugHook(); // 开关未开:临时挂载采集一次
-            const url = genDebugIssueUrl();
-            if (!wasOn) debugUnhook(); // 临时挂载用后即卸,不残留
-            const $link = dialog.find('#debug-issue-link');
-            $link.attr('href', url).text(url.slice(0, 100) + '...');
-            dialog.find('#row-debug-result').css('display', 'flex');
-            if (window.open) { const w = window.open(url, '_blank'); if (w) w.focus(); }
+            try {
+                const url = genDebugIssueUrl();
+                const $link = dialog.find('#debug-issue-link');
+                $link.attr('href', url).text(url.slice(0, 100) + '...');
+                dialog.find('#row-debug-result').css('display', 'flex');
+                if (window.open) { const w = window.open(url, '_blank'); if (w) w.focus(); }
+            } finally {
+                if (!wasOn) debugUnhook(); // 临时挂载用后必卸,异常也不残留包裹态
+            }
         });
 
         dialog.find('.acu-reverse-check').on('change', function() {
@@ -3073,15 +3076,20 @@ ${allTableNames.map(tName => {
                 </div>`;
             insertHtmlToPage(html); 
 
+            // 注入段各自独立兜错：若抛异常不能让 bindEvents 不达（否则新 DOM 零事件处理器，面板整体点不动）
             if (showDash && config.dashboardPosition === 'embedded') {
-                 const dashHtml = renderDashboard(tables, true);
-                 injectEmbeddedDashboard(dashHtml, `acu-theme-${config.theme}`, cssVars);
+                 try {
+                     const dashHtml = renderDashboard(tables, true);
+                     injectEmbeddedDashboard(dashHtml, `acu-theme-${config.theme}`, cssVars);
+                 } catch (e) { console.error('[ACU] 嵌入仪表盘注入失败(不影响面板):', e); }
             } else {
                  $('.acu-embedded-dashboard-container').remove();
             }
 
             if (optionBtnContent) {
-                injectIndependentOptions(optionBtnContent, `acu-theme-${config.theme}`, cssVars);
+                try {
+                    injectIndependentOptions(optionBtnContent, `acu-theme-${config.theme}`, cssVars);
+                } catch (e) { console.error('[ACU] 选项容器注入失败(不影响面板):', e); }
             } else {
                 $('.acu-embedded-options-container').remove();
             }
@@ -3804,6 +3812,7 @@ const checkRowChanged = (realIdx, row) => {
         slicedRows.forEach((item) => {
             const row = item.data;
             const realIndex = item.originalIndex;
+            if (!Array.isArray(row)) return; // 脏数据守卫：null/非数组行跳过，避免中断整面板渲染
              const cardTitle = row[titleColIndex] || '未命名';
             const showDefaultIndex = (titleColIndex === 1);
             const isRowNew = currentDiffMap.has(`${tableName}-row-${realIndex}`);
@@ -3911,6 +3920,7 @@ const checkRowChanged = (realIdx, row) => {
             if ($target.closest('.acu-wrapper').length) return;
 
             if ($target.closest('.acu-cell-menu').length) return;
+            if ($target.closest('.acu-menu-backdrop').length) return; // backdrop 自带关闭逻辑，勿连带 closePanel
             if ($target.closest('.acu-edit-overlay').length) return;
             if ($target.closest('.acu-popup-overlay').length) return;
             if ($target.closest('.acu-quick-view-overlay').length) return;
@@ -4446,8 +4456,8 @@ const checkRowChanged = (realIdx, row) => {
                     lastRawTableRef = null;
                     lastTableSetFingerprint = '';
                     currentDiffMap.clear();
-                    try { const d = getTableData(true); if (d) saveSnapshot(d); } catch (_) {}
-                    try { renderInterface(true); } catch (_) {}
+                    try { const d = getTableData(true); if (d) saveSnapshot(d); } catch (e) { console.error('[ACU] 追平结束重拉失败:', e); }
+                    try { renderInterface(true); } catch (e) { console.error('[ACU] 追平结束刷新失败:', e); }
                     if (window.toastr) window.toastr.success(saved ? '追平完成，数据已刷新。' : '追平结束，数据已刷新。', { timeOut: 2500 });
                 };
                 // 连点保护：新点击先停掉旧轮询;同时停填表轮询(双向互斥,防 1.5s+2s 叠加重建)
@@ -4476,13 +4486,13 @@ const checkRowChanged = (realIdx, row) => {
                             lastRawTableRef = null;
                             lastTableSetFingerprint = '';
                             lastTableDataRefreshed = true;
-                            try { renderInterface(true); } catch (_) {}
+                            try { renderInterface(true); } catch (e) { console.error('[ACU] 追平即时刷新失败:', e); }
                         } else {
                             catchupStable++;
                             if (catchupStable >= CATCHUP_STABLE_N) { finishCatchup(true); return; }
                         }
                         catchupLastFp = fp;
-                    } catch (_) { /* 轮询一次异常忽略，继续 */ }
+                    } catch (e) { console.error('[ACU] 追平轮询 tick 异常:', e); }
                 }, CATCHUP_POLL_MS);
                 // 兜底：若 10 分钟没到（被 stop 或异常），确保不悬挂。
                 // 单例 timer：新点击先 stop（clearTimeout），旧兜底不会误终止新轮询。
@@ -4591,8 +4601,15 @@ const checkRowChanged = (realIdx, row) => {
     const toggleOrderEditMode = () => {
         if (isEditingOrder) {
             const { $ } = getCore();
-            const newOrder = []; 
+            const newOrder = [];
             $('.acu-nav-tabs-area .acu-nav-btn').each(function() { const t = $(this).data('table'); if(t && t!==TAB_DASHBOARD) newOrder.push(t); });
+            // 隐藏表不渲染按钮，直接存 newOrder 会把它们从 savedOrder 剔除；
+            // 取消隐藏后会全部沉底。把仍存在但不在 DOM 序里的表按原相对顺序插回队尾。
+            // 用当前数据集合做存在性过滤，已删表不回插（免死名永久滞留存储）。
+            try {
+                const knownTables = new Set(Object.keys(getTableData() || {}));
+                getSavedTableOrder().forEach(n => { if (!newOrder.includes(n) && knownTables.has(n)) newOrder.push(n); });
+            } catch (_) {}
             saveTableOrder(newOrder);
             const newActionOrder = [];
             $('.acu-nav-actions-area .acu-action-btn').each(function() { if(this.id) newActionOrder.push(this.id); });
@@ -4876,11 +4893,13 @@ const checkRowChanged = (realIdx, row) => {
         dialog.find('#dlg-card-cancel').click(closeDialog);
 
         dialog.find('#dlg-card-save').click(async () => {
-            const currentData = getTableData(); 
+            const currentData = getTableData();
             if (currentData && currentData[tableKey]) {
                 const currentRow = currentData[tableKey].content[rowIndex + 1];
+                if (!Array.isArray(currentRow)) { closeDialog(); return; } // 并发删行/脏数据守卫
                 let hasChanges = false;
                 let updateObj = {};
+                const oldRow = currentRow.slice(); // 保存失败时的回滚基线
                 dialog.find('textarea').each(function () {
                     const colIdx = parseInt($(this).data('col'));
                     const newVal = $(this).val();
@@ -4891,12 +4910,26 @@ const checkRowChanged = (realIdx, row) => {
                     }
                 });
                 if (hasChanges) {
-                    await saveDataToDatabase(currentData, false, false, {
+                    const ok = await saveDataToDatabase(currentData, false, false, {
                         type: 'row_edit',
                         tableName: tableName,
                         rowIndex: rowIndex,
                         updateObj: updateObj
                     });
+                    if (ok === false) {
+                        // 保存失败：回滚就地写入，并清缓存强制重拉，防止脏缓存假数据（对齐 cell_edit 回滚语义）
+                        try {
+                            const sheet = currentData[tableKey];
+                            if (Array.isArray(sheet.content[rowIndex + 1])) {
+                                for (let ci = 0; ci < oldRow.length; ci++) sheet.content[rowIndex + 1][ci] = oldRow[ci];
+                            }
+                        } catch (_) {}
+                        cachedTableData = null;
+                        lastRawTableRef = null;
+                        lastTableSetFingerprint = '';
+                        renderInterface(true);
+                        if (window.toastr) window.toastr.error('保存失败，已回滚并刷新。');
+                    }
                 }
             }
             closeDialog();
@@ -5259,6 +5292,11 @@ const checkRowChanged = (realIdx, row) => {
                              try { localStorage.removeItem(STORAGE_KEY_LAST_SNAPSHOT); } catch (_) {}
                              currentDiffMap.clear();
                              currentPage = 1;
+                             // 多选/待删状态跨聊天必须清空：rowKey 不含 chatId，新聊天同名表同索引会碰撞，
+                             // 残留会让「刷新」按钮对新聊天按索引误删行（对齐 closePanel 的清理语义）。
+                             isMultiSelectMode = false;
+                             selectedRows.clear();
+                             pendingDeletes.clear();
                              if (!isEditingOrder) renderInterface(true);
                          });
                      }
