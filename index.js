@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.4'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.5'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -3938,14 +3938,25 @@ const checkRowChanged = (realIdx, row) => {
             currentPage = 1;
             currentSearchTerm = '';
             globalScrollTop = 0;
+            // 点击兜底：手动追平/填表通知可能漏发，点表时指纹先行读一次 DB 兜底
+            // getTableData(true) 返回原始 raw（{sheet_...}），需 processJsonData 转为加工态 {name:{rows}}；仅当 lastTableDataRefreshed 为真（指纹/表集合变化）才重处理
+            let effectiveTables = tables;
+            try {
+                if (!inEditingContext() && !catchupTimer) {
+                    const freshRaw = getTableData(true);
+                    if (freshRaw && lastTableDataRefreshed) {
+                        try { effectiveTables = processJsonData(freshRaw); } catch (_) { effectiveTables = tables; }
+                    }
+                }
+            } catch (_) {}
             
             if (tableName === TAB_DASHBOARD) {
-                $('#acu-data-area').html(renderDashboard(tables)).addClass('visible');
+                $('#acu-data-area').html(renderDashboard(effectiveTables)).addClass('visible');
                 const h = getTableHeights()[TAB_DASHBOARD];
                 $('#acu-data-area').css({height: h ? h + 'px' : '60vh', maxHeight: '95vh'});
                 bindDataAreaEvents();
-            } else if (tables[tableName]) {
-                $('#acu-data-area').html(renderTableContent(tables[tableName], tableName)).addClass('visible');
+            } else if (effectiveTables[tableName]) {
+                $('#acu-data-area').html(renderTableContent(effectiveTables[tableName], tableName)).addClass('visible');
                 const h = getTableHeights()[tableName];
                 $('#acu-data-area').css({height: h ? h + 'px' : '60vh', maxHeight: '95vh'});
                 bindDataAreaEvents();
