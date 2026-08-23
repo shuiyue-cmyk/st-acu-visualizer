@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.6'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.7'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -1590,6 +1590,8 @@
             .acu-embedded-dashboard-container .acu-dash-container { gap: 0 !important; padding: 0 !important; }
                 .acu-embedded-dashboard-container .acu-dash-col { gap: 0 !important; }
                 .acu-embedded-dashboard-container .acu-dash-card { border-radius: 0 !important; box-shadow: none !important; border: none !important; margin: 0 !important; } @media (max-width: 768px) { .acu-embedded-dashboard-container .acu-dash-container { overflow: visible !important; height: auto !important; } } /* 全局隐藏仪表盘卡槽滚动条 (嵌入+悬浮) */ .acu-dash-npc-grid::-webkit-scrollbar, .acu-dash-char-info::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; background: transparent !important; } .acu-dash-npc-grid, .acu-dash-char-info { scrollbar-width: none !important; -ms-overflow-style: none !important; } .acu-theme-aurora .acu-dash-card { background: rgba(30, 41, 59, 0.95) !important; } .acu-theme-starship .acu-dash-card { background: rgba(30, 27, 75, 0.95) !important; } .acu-theme-sky .acu-dash-card { background: rgba(240, 249, 255, 0.95) !important; } 
+                /* TT 增量：移动端 safe area / IME 视口补充；ST 无该变量时退化为 0，不影响布局 */
+                .acu-wrapper { padding-bottom: max(0px, var(--tt-ime-bottom, 0px)); }
             </style>
         `;
         $('head').append(styles);
@@ -3625,6 +3627,14 @@ ${allTableNames.map(tName => {
             });
         }
         chatObserversReady = true;
+        // TT 增量：订阅 api.layout 视口/IME 变化，补充 safeInsets；ST 无该 API 时短路
+        try {
+            const layoutApi = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.layout);
+            if (layoutApi && typeof layoutApi.subscribe === 'function' && !ensureChatObservers._ttLayoutSub) {
+                ensureChatObservers._ttLayoutSub = true;
+                layoutApi.subscribe(() => { try { alignWrapperToMessageColumnNow(); } catch (_) {} }).catch(() => {});
+            }
+        } catch (_) {}
         if ($chat && $chat.length) {
             try { observer.observe($chat[0], { childList: true }); lastObservedChatEl = $chat[0]; } catch (_) {}
             if (columnResizeObserver) { try { columnResizeObserver.observe($chat[0]); } catch (_) {} }
@@ -5287,33 +5297,46 @@ const checkRowChanged = (realIdx, row) => {
                  // 在切换聊天时会被替换为新聊天的数据，但前端缓存不会自动失效；renderInterface(false)
                  // 走缓存路径，会把旧聊天的表显示到新聊天里。
                  // 订阅 ST 的 CHAT_CHANGED 事件，命中时清缓存 + 丢快照 + 强制刷新，杜绝跨聊天串表。
+                 const trySubscribeChatChanged = () => {
+                     try {
+                         const w = window.parent || window;
+                         const ST = w.SillyTavern || window.SillyTavern;
+                         const evSrc = ST && ST.eventSource;
+                         const evTypes = ST && ST.eventTypes;
+                         if (evSrc && typeof evSrc.on === 'function' && evTypes && evTypes.CHAT_CHANGED) {
+                             evSrc.on(evTypes.CHAT_CHANGED, () => {
+                                 stopFillPoll();
+                                 stopCatchupPoll(); // 切聊天停掉旧追平轮询，防跨聊天误刷新/误 toast
+                                 cachedTableData = null;
+                                 lastRawTableRef = null;
+                                 lastTableSetFingerprint = '';
+                                 memorySnapshot_ACU = null;
+                                 try { localStorage.removeItem(STORAGE_KEY_LAST_SNAPSHOT); } catch (_) {}
+                                 currentDiffMap.clear();
+                                 currentPage = 1;
+                                 // 多选/待删状态跨聊天必须清空：rowKey 不含 chatId，新聊天同名表同索引会碰撞，
+                                 // 残留会让「刷新」按钮对新聊天按索引误删行（对齐 closePanel 的清理语义）。
+                                 isMultiSelectMode = false;
+                                 selectedRows.clear();
+                                 pendingDeletes.clear();
+                                 if (!isEditingOrder) renderInterface(true);
+                             });
+                         }
+                     } catch (e) { console.warn('[ACU-UI] 订阅 CHAT_CHANGED 失败，串表保护未启用:', e); }
+                 };
+                 // TT 增量：若存在 __TAURITAVERN__.ready，待宿主就绪后再订阅，避免 importWithRetry 竞态漏接；ST 无该符号时短路走原路径
                  try {
-                     const w = window.parent || window;
-                     const ST = w.SillyTavern || window.SillyTavern;
-                     const evSrc = ST && ST.eventSource;
-                     const evTypes = ST && ST.eventTypes;
-                     if (evSrc && typeof evSrc.on === 'function' && evTypes && evTypes.CHAT_CHANGED) {
-                         evSrc.on(evTypes.CHAT_CHANGED, () => {
-                             stopFillPoll();
-                             stopCatchupPoll(); // 切聊天停掉旧追平轮询，防跨聊天误刷新/误 toast
-                             cachedTableData = null;
-                             lastRawTableRef = null;
-                             lastTableSetFingerprint = '';
-                             memorySnapshot_ACU = null;
-                             try { localStorage.removeItem(STORAGE_KEY_LAST_SNAPSHOT); } catch (_) {}
-                             currentDiffMap.clear();
-                             currentPage = 1;
-                             // 多选/待删状态跨聊天必须清空：rowKey 不含 chatId，新聊天同名表同索引会碰撞，
-                             // 残留会让「刷新」按钮对新聊天按索引误删行（对齐 closePanel 的清理语义）。
-                             isMultiSelectMode = false;
-                             selectedRows.clear();
-                             pendingDeletes.clear();
-                             if (!isEditingOrder) renderInterface(true);
-                         });
-                     }
-                 } catch (e) { console.warn('[ACU-UI] 订阅 CHAT_CHANGED 失败，串表保护未启用:', e); }
+                     const ttReady = (typeof window !== 'undefined' && (window.__TAURITAVERN__?.ready || window.__TAURITAVERN_MAIN_READY__));
+                     if (ttReady && typeof ttReady.then === 'function') ttReady.then(trySubscribeChatChanged).catch(trySubscribeChatChanged);
+                     else trySubscribeChatChanged();
+                 } catch (_) { trySubscribeChatChanged(); }
              } else setTimeout(loop, 1000);
         };
+        // TT 增量：ready 就绪后立即重试，缩短 importWithRetry 空转；ST 无该符号时无影响
+        try {
+            const ttReadyInit = (typeof window !== 'undefined' && (window.__TAURITAVERN__?.ready || window.__TAURITAVERN_MAIN_READY__));
+            if (ttReadyInit && typeof ttReadyInit.then === 'function') ttReadyInit.then(() => { if (!isInitialized) loop(); }).catch(() => {});
+        } catch (_) {}
         loop();
     };
     const { $ } = getCore();
