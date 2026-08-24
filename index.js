@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.12'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.13'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -1593,6 +1593,8 @@
                 .acu-embedded-dashboard-container .acu-dash-card { border-radius: 0 !important; box-shadow: none !important; border: none !important; margin: 0 !important; } @media (max-width: 768px) { .acu-embedded-dashboard-container .acu-dash-container { overflow: visible !important; height: auto !important; } } /* 全局隐藏仪表盘卡槽滚动条 (嵌入+悬浮) */ .acu-dash-npc-grid::-webkit-scrollbar, .acu-dash-char-info::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; background: transparent !important; } .acu-dash-npc-grid, .acu-dash-char-info { scrollbar-width: none !important; -ms-overflow-style: none !important; } .acu-theme-aurora .acu-dash-card { background: rgba(30, 41, 59, 0.95) !important; } .acu-theme-starship .acu-dash-card { background: rgba(30, 27, 75, 0.95) !important; } .acu-theme-sky .acu-dash-card { background: rgba(240, 249, 255, 0.95) !important; } 
                 /* TT 增量：移动端 safe area / IME 视口补充；ST 无该变量时退化为 0，不影响布局 */
                 .acu-wrapper { padding-bottom: max(0px, var(--tt-ime-bottom, 0px)); }
+                /* 滚动模式：随 #sheld 滚动且粘底满宽，避免 #chat 直属 fault 且视觉填满底部 */
+                .acu-wrapper.acu-tt-scroll { position: sticky; bottom: 0; z-index: 5; width: 100%; margin: 0 !important; border-radius: 0 !important; }
             </style>
         `;
         $('head').append(styles);
@@ -3062,7 +3064,7 @@ ${allTableNames.map(tName => {
             const cssVars = `--acu-opt-cols:repeat(${optMaxPerRow}, 1fr); --acu-opt-btn-w:${optBtnW}; --acu-card-width:${config.cardWidth}px; --acu-font-size:${config.fontSize}px; --acu-opt-font-size:${config.optionFontSize || 13}px; --acu-dash-font-size:${config.dashboardFontSize || 13}px; --acu-highlight:${colorVal.main}; --acu-highlight-bg:${colorVal.bg}; --acu-accent:${colorVal.main}; --acu-title-color:${titleColorVal}; --acu-nav-cols:${gridCols}; --acu-text-max-height:${config.limitLongText!==false?'80px':'none'}; --acu-text-overflow:${config.limitLongText!==false?'auto':'visible'}`;
 
             let html = `
-                <div class="acu-wrapper acu-theme-${config.theme}" style="${cssVars}">
+                <div class="acu-wrapper acu-theme-${config.theme} acu-tt-${config.ttPanelMode || 'fixed'}" style="${cssVars}">
                     <div class="acu-data-display acu-layout-${config.layout} ${showPanel ? 'visible' : ''} ${isAlreadyVisible ? 'acu-no-anim' : ''}" id="acu-data-area" style="${styleHeight}">
                         ${contentHtml}
                     </div>
@@ -3619,18 +3621,23 @@ ${allTableNames.map(tName => {
                     alignWrapperToMessageColumnNow();
                 }
             } else {
-                // 滚动 + bottom：改挂末楼 mes_block 内，避免 #chat 直属触发 Bounded fault（与 JS-Slash-Runner 的 message-runtime 隔离）
-                const $lastMesSc = $chatNode.find('.mes').last();
-                if ($lastMesSc.length) {
-                    const $tbSc = $lastMesSc.find('.mes_block').length ? $lastMesSc.find('.mes_block') : $lastMesSc;
-                    if (!$tbSc.find('.acu-wrapper').length) $tbSc.append($wrapper);
-                    else if ($tbSc.children().last()[0] !== $wrapper[0]) $tbSc.append($wrapper);
+                // 滚动 + bottom：改挂 #sheld 末尾且粘底（随 #sheld 滚动，避免 #chat 直属 fault 及 JS-Slash-Runner 冲突）
+                const $sheldSc2 = $('#sheld');
+                if ($sheldSc2.length) {
+                    if ($sheldSc2.children().last()[0] !== $wrapper[0]) $sheldSc2.append($wrapper);
                 } else {
-                    const children = $chatNode.children();
-                    const lastChild = children.last()[0];
-                    if (lastChild && lastChild !== $wrapper[0]) {
-                        if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
-                            $chatNode.append($wrapper);
+                    const $lastMesSc = $chatNode.find('.mes').last();
+                    if ($lastMesSc.length) {
+                        const $tbSc = $lastMesSc.find('.mes_block').length ? $lastMesSc.find('.mes_block') : $lastMesSc;
+                        if (!$tbSc.find('.acu-wrapper').length) $tbSc.append($wrapper);
+                        else if ($tbSc.children().last()[0] !== $wrapper[0]) $tbSc.append($wrapper);
+                    } else {
+                        const children = $chatNode.children();
+                        const lastChild = children.last()[0];
+                        if (lastChild && lastChild !== $wrapper[0]) {
+                            if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
+                                $chatNode.append($wrapper);
+                            }
                         }
                     }
                 }
@@ -3727,8 +3734,12 @@ ${allTableNames.map(tName => {
                 }
             }
         } else {
-            // scroll 模式：参照仪表盘，随聊天滚动；bottom 也改挂末楼 mes_block 内，避免 #chat 直属触发 Bounded fault
-            if (config.frontendPosition === 'message') {
+            // scroll 模式：随 #sheld 滚动且粘底满宽（参照仪表盘，避免 #chat 直属 fault 及 JS-Slash-Runner 冲突）
+            const $sheldScTop = $('#sheld');
+            if ($sheldScTop.length) {
+                $sheldScTop.append($newContent);
+                alignWrapperToMessageColumn();
+            } else if (config.frontendPosition === 'message') {
                  const $lastMes = $chat.find('.mes').last();
                  if ($lastMes.length) {
                      const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
