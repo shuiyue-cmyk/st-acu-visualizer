@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.7'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.8'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -3573,6 +3573,20 @@ ${allTableNames.map(tName => {
             const $chatNode = $('#chat');
             const $wrapper = $('.acu-wrapper');
             if (!$chatNode.length || !$wrapper.length) return;
+            // TT bounded：wrapper 已改挂 #sheld，不与 #chat > .mes 投影争夺，避免 unknown direct child fault（ST 无该 API 时跳过）
+            let _isTTBounded = false;
+            try {
+                const _cs = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.chatSurface);
+                if (_cs && typeof _cs.isManagedOwnershipRequired === 'function') _isTTBounded = !!_cs.isManagedOwnershipRequired();
+                else if (typeof localStorage !== 'undefined' && localStorage.getItem('chat_virtualization_enabled') === 'true') _isTTBounded = true;
+            } catch (_) {}
+            if (_isTTBounded) {
+                const $sheld = $('#sheld');
+                const $target = $sheld.length ? $sheld : $chatNode.parent();
+                if ($target.length && $wrapper.parent()[0] !== $target[0]) $target.append($wrapper);
+                alignWrapperToMessageColumnNow();
+                return;
+            }
             if (currentConfig.frontendPosition === 'message') {
                 const $lastMes = $chatNode.find('.mes').last();
                 if ($lastMes.length) {
@@ -3647,7 +3661,21 @@ ${allTableNames.map(tName => {
         const config = getConfig();
         $('.acu-wrapper').remove();
         const $newContent = $(html);
-        if (config.frontendPosition === 'message') {
+        // TT bounded 虚拟化：#chat > .acu-wrapper 会触发 unknown direct child fault（截图 Bounded ChatSurface 证据），
+        // 此时改挂 #sheld（#chat 的父容器，不在 virtualizer 管理集合），ST 无该 API 时短路走原路径
+        let isTTBounded = false;
+        try {
+            const cs = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.chatSurface);
+            if (cs && typeof cs.isManagedOwnershipRequired === 'function') isTTBounded = !!cs.isManagedOwnershipRequired();
+            else if (typeof localStorage !== 'undefined' && localStorage.getItem('chat_virtualization_enabled') === 'true') isTTBounded = true;
+        } catch (_) {}
+        if (isTTBounded) {
+            const $sheld = $('#sheld');
+            if ($sheld.length) $sheld.append($newContent);
+            else if ($chat.length && $chat.parent().length) $chat.parent().append($newContent);
+            else $('body').append($newContent);
+            alignWrapperToMessageColumn();
+        } else if (config.frontendPosition === 'message') {
              const $lastMes = $chat.find('.mes').last();
              if ($lastMes.length) {
                  const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
