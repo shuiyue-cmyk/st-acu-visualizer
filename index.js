@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.23'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.4.1'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -3533,6 +3533,13 @@ ${allTableNames.map(tName => {
     const applyPanelAlignment = (plan) => {
         if (!plan) return;
         try {
+            // 幂等守卫：内联值已一致时跳过写入。无脑 setProperty 会给元素挂 style 脏标记，
+            // 在 TT bounded 下引发「写样式→高度变→TT 重排→再触发对齐」的测量振荡（R1）。
+            const s = plan.el.style;
+            if (s.getPropertyValue('width') === plan.width &&
+                s.getPropertyValue('max-width') === plan.width &&
+                s.getPropertyValue('margin-left') === plan.marginLeft &&
+                s.getPropertyValue('margin-right') === '0') return;
             plan.el.style.setProperty('width', plan.width, 'important');
             plan.el.style.setProperty('max-width', plan.width, 'important');
             plan.el.style.setProperty('margin-left', plan.marginLeft, 'important');
@@ -3707,7 +3714,8 @@ ${allTableNames.map(tName => {
         // fixed：输入框上方常驻（#form_sheld/#send_form 前），彻底脱离 #chat 虚拟化；
         // scroll：参照仪表盘/选项随聊天滚动（挂末楼 mes_block，不进 #chat 直属避免 Bounded fault）。
         const isTTBounded = detectTTBounded();
-        const ttMode = isTTBounded ? (config.ttPanelMode || 'fixed') : '';
+        // 归一化：残留非法值一律回退 fixed，防止穿透到原生 bottom 分支直挂 #chat 触发 bounded fault
+        const ttMode = isTTBounded ? (['fixed', 'scroll'].includes(config.ttPanelMode) ? config.ttPanelMode : 'fixed') : '';
         if (ttMode === 'fixed') {
             const $formAnchor = $('#form_sheld, #send_form').first();
             if ($formAnchor.length) {
@@ -3728,7 +3736,12 @@ ${allTableNames.map(tName => {
                 const $tbS = $lastMesS.find('.mes_block').length ? $lastMesS.find('.mes_block') : $lastMesS;
                 $tbS.append($newContent);
             } else {
-                if ($chat.length) $chat.append($newContent); else $('body').append($newContent);
+                // bounded 下禁止直挂 #chat（unknown direct child fault，偶发根因）：
+                // 无可见楼层时改挂 #sheld/$chat.parent()，待首楼出现后由归位逻辑迁入
+                const $sheldS = $('#sheld');
+                if ($sheldS.length) $sheldS.append($newContent);
+                else if ($chat.length && $chat.parent().length) $chat.parent().append($newContent);
+                else $('body').append($newContent);
             }
             alignWrapperToMessageColumn();
         } else if (config.frontendPosition === 'message') {
