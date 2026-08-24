@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.10'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.11'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -134,7 +134,8 @@
         dbAppleGlass: false,
         dbAccent: 'blue',
         debugMode: false,
-        dbGlassStyle: 'off'
+        dbGlassStyle: 'off',
+        ttPanelMode: 'fixed'
     };
 
     const THEMES = [
@@ -1592,9 +1593,6 @@
                 .acu-embedded-dashboard-container .acu-dash-card { border-radius: 0 !important; box-shadow: none !important; border: none !important; margin: 0 !important; } @media (max-width: 768px) { .acu-embedded-dashboard-container .acu-dash-container { overflow: visible !important; height: auto !important; } } /* 全局隐藏仪表盘卡槽滚动条 (嵌入+悬浮) */ .acu-dash-npc-grid::-webkit-scrollbar, .acu-dash-char-info::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; background: transparent !important; } .acu-dash-npc-grid, .acu-dash-char-info { scrollbar-width: none !important; -ms-overflow-style: none !important; } .acu-theme-aurora .acu-dash-card { background: rgba(30, 41, 59, 0.95) !important; } .acu-theme-starship .acu-dash-card { background: rgba(30, 27, 75, 0.95) !important; } .acu-theme-sky .acu-dash-card { background: rgba(240, 249, 255, 0.95) !important; } 
                 /* TT 增量：移动端 safe area / IME 视口补充；ST 无该变量时退化为 0，不影响布局 */
                 .acu-wrapper { padding-bottom: max(0px, var(--tt-ime-bottom, 0px)); }
-                /* 底部折叠态遮罩透明化：仅保留胶囊按钮背景，去除全宽暗色遮罩避免遮挡内容 */
-                .acu-wrapper { background: transparent !important; backdrop-filter: none !important; }
-                .acu-nav-container.collapsed { background: transparent !important; backdrop-filter: none !important; box-shadow: none !important; border: none !important; }
             </style>
         `;
         $('head').append(styles);
@@ -2307,6 +2305,14 @@
                                         <button class="acu-step-btn plus" data-key="itemsPerPage" data-step="5" data-min="5" data-max="100"><i class="fa-solid fa-plus"></i></button>
                                     </div>
                                 </div>
+                            </div></div></div><div class="acu-section-header" data-target="sec-tt-adapt"><div class="acu-section-title"><i class="fa-solid fa-tablet-screen-button"></i> TT 适配</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-tt-adapt"><div class="acu-settings-group"><div class="acu-control-row">
+                                <div class="acu-label-col"><span class="acu-label-main">面板位置</span><span class="acu-label-sub" style="font-weight:normal">固定在输入框上方 / 随聊天滚动（参照仪表盘）</span></div>
+                                <div class="acu-input-col">
+                                    <select id="cfg-tt-panel-mode" class="acu-nice-select">
+                                        <option value="fixed" ${config.ttPanelMode === 'fixed' ? 'selected' : ''}>固定（输入框上方）</option>
+                                        <option value="scroll" ${config.ttPanelMode === 'scroll' ? 'selected' : ''}>滚动（随聊天）</option>
+                                    </select>
+                                </div>
                             </div></div></div><div class="acu-section-header" data-target="sec-actions"><div class="acu-section-title"><i class="fa-solid fa-list-check"></i> 选项面板 ${!allTableNames.some(n => n.includes('选项')) ? '<span class="acu-section-desc" style="color:#e74c3c !important;">未检测到选项表</span>' : ''}</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-actions"><div class="acu-settings-group">
 <div class="acu-control-row" >
                                 <div class="acu-label-col"><span class="acu-label-main">选项面板开关</span></div>
@@ -2436,6 +2442,7 @@ ${allTableNames.map(tName => {
         });
         dialog.find('#cfg-layout').on('change', function() { saveConfig({ layout: $(this).val() }); renderInterface(false); });
         dialog.find('#cfg-frontend-pos').on('change', function() { saveConfig({ frontendPosition: $(this).val() }); renderInterface(false); });
+        dialog.find('#cfg-tt-panel-mode').on('change', function() { saveConfig({ ttPanelMode: $(this).val() }); renderInterface(false); });
         dialog.find('#cfg-font-family').on('change', function() { saveConfig({ fontFamily: $(this).val() }); });
         
         dialog.find('#cfg-highlight-custom').on('input change', function() {
@@ -3576,26 +3583,29 @@ ${allTableNames.map(tName => {
             const $chatNode = $('#chat');
             const $wrapper = $('.acu-wrapper');
             if (!$chatNode.length || !$wrapper.length) return;
-            // 输入框上方常驻：优先保持 wrapper 在 #form_sheld/#send_form 前，彻底脱离 #chat 虚拟化且更美观；找不到表单时回退
-            const $formAnchorChk = $('#form_sheld, #send_form').first();
-            if ($formAnchorChk.length) {
-                if ($wrapper[0].nextSibling !== $formAnchorChk[0]) $formAnchorChk.before($wrapper);
-                alignWrapperToMessageColumnNow();
-                return;
-            }
-            // 回退：无表单时按原 TT bounded 逻辑改挂 #sheld，避免 unknown direct child fault
-            let _isTTBounded = false;
-            try {
-                const _cs = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.chatSurface);
-                if (_cs && typeof _cs.isManagedOwnershipRequired === 'function') _isTTBounded = !!_cs.isManagedOwnershipRequired();
-                else if (typeof localStorage !== 'undefined' && localStorage.getItem('chat_virtualization_enabled') === 'true') _isTTBounded = true;
-            } catch (_) {}
-            if (_isTTBounded) {
-                const $sheld = $('#sheld');
-                const $target = $sheld.length ? $sheld : $chatNode.parent();
-                if ($target.length && $wrapper.parent()[0] !== $target[0]) $target.append($wrapper);
-                alignWrapperToMessageColumnNow();
-                return;
+            const ttModeChk = currentConfig.ttPanelMode || 'fixed';
+            if (ttModeChk === 'fixed') {
+                // 固定模式（输入框上方常驻，透明化前）：优先保持 wrapper 在 #form_sheld/#send_form 前，彻底脱离 #chat 虚拟化；找不到表单时回退
+                const $formAnchorChk = $('#form_sheld, #send_form').first();
+                if ($formAnchorChk.length) {
+                    if ($wrapper[0].nextSibling !== $formAnchorChk[0]) $formAnchorChk.before($wrapper);
+                    alignWrapperToMessageColumnNow();
+                    return;
+                }
+                // 回退：无表单时按原 TT bounded 逻辑改挂 #sheld，避免 unknown direct child fault
+                let _isTTBounded = false;
+                try {
+                    const _cs = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.chatSurface);
+                    if (_cs && typeof _cs.isManagedOwnershipRequired === 'function') _isTTBounded = !!_cs.isManagedOwnershipRequired();
+                    else if (typeof localStorage !== 'undefined' && localStorage.getItem('chat_virtualization_enabled') === 'true') _isTTBounded = true;
+                } catch (_) {}
+                if (_isTTBounded) {
+                    const $sheld = $('#sheld');
+                    const $target = $sheld.length ? $sheld : $chatNode.parent();
+                    if ($target.length && $wrapper.parent()[0] !== $target[0]) $target.append($wrapper);
+                    alignWrapperToMessageColumnNow();
+                    return;
+                }
             }
             if (currentConfig.frontendPosition === 'message') {
                 const $lastMes = $chatNode.find('.mes').last();
@@ -3671,27 +3681,46 @@ ${allTableNames.map(tName => {
         const config = getConfig();
         $('.acu-wrapper').remove();
         const $newContent = $(html);
-        // 布局：输入框正上方常驻（#form_sheld/#send_form 前），彻底脱离 #chat 虚拟化集合且更美观；
-        // ST/TT 双兼容：优先插到输入框前，找不到表单时再按原 frontendPosition 逻辑回退，TT bounded 时亦不进 #chat
-        const $formAnchor = $('#form_sheld, #send_form').first();
-        if ($formAnchor.length) {
-            $formAnchor.before($newContent);
-            alignWrapperToMessageColumn();
-        } else {
-            // 回退：找不到输入框时走原分支（保留 message 依附末楼的语义），TT bounded 时已由外层 $formAnchor 覆盖，此处仅 ST 异常 DOM 回退
-            let isTTBounded = false;
-            try {
-                const cs = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.chatSurface);
-                if (cs && typeof cs.isManagedOwnershipRequired === 'function') isTTBounded = !!cs.isManagedOwnershipRequired();
-                else if (typeof localStorage !== 'undefined' && localStorage.getItem('chat_virtualization_enabled') === 'true') isTTBounded = true;
-            } catch (_) {}
-            if (isTTBounded) {
-                const $sheld = $('#sheld');
-                if ($sheld.length) $sheld.append($newContent);
-                else if ($chat.length && $chat.parent().length) $chat.parent().append($newContent);
-                else $('body').append($newContent);
+        // TT 适配：面板位置可切换（设置 → TT 适配）
+        // fixed（默认，输入框上方常驻，透明化前）：插到 #form_sheld 前，彻底脱离 #chat 虚拟化，不遮挡时用透明遮罩仅留胶囊
+        // scroll（参照仪表盘/选项，随聊天滚动）：走原 frontendPosition 逻辑，插到 #chat/末楼，随 V 卸载而滚动
+        const ttMode = config.ttPanelMode || 'fixed';
+        if (ttMode === 'fixed') {
+            const $formAnchor = $('#form_sheld, #send_form').first();
+            if ($formAnchor.length) {
+                $formAnchor.before($newContent);
                 alignWrapperToMessageColumn();
-            } else if (config.frontendPosition === 'message') {
+            } else {
+                // 回退：找不到输入框时改挂 #sheld 避免进 #chat 触发 bounded fault
+                let isTTBounded = false;
+                try {
+                    const cs = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.chatSurface);
+                    if (cs && typeof cs.isManagedOwnershipRequired === 'function') isTTBounded = !!cs.isManagedOwnershipRequired();
+                    else if (typeof localStorage !== 'undefined' && localStorage.getItem('chat_virtualization_enabled') === 'true') isTTBounded = true;
+                } catch (_) {}
+                if (isTTBounded) {
+                    const $sheld = $('#sheld');
+                    if ($sheld.length) $sheld.append($newContent);
+                    else if ($chat.length && $chat.parent().length) $chat.parent().append($newContent);
+                    else $('body').append($newContent);
+                    alignWrapperToMessageColumn();
+                } else if (config.frontendPosition === 'message') {
+                     const $lastMes = $chat.find('.mes').last();
+                     if ($lastMes.length) {
+                         const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
+                         $targetBlock.append($newContent);
+                         alignWrapperToMessageColumn();
+                     } else {
+                         if ($chat.length) $chat.append($newContent); else $('body').append($newContent);
+                     }
+                } else {
+                    if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
+                    alignWrapperToMessageColumn();
+                }
+            }
+        } else {
+            // scroll 模式：参照仪表盘，随聊天滚动
+            if (config.frontendPosition === 'message') {
                  const $lastMes = $chat.find('.mes').last();
                  if ($lastMes.length) {
                      const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
