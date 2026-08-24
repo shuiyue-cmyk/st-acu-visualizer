@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.8'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.9'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -3573,7 +3573,14 @@ ${allTableNames.map(tName => {
             const $chatNode = $('#chat');
             const $wrapper = $('.acu-wrapper');
             if (!$chatNode.length || !$wrapper.length) return;
-            // TT bounded：wrapper 已改挂 #sheld，不与 #chat > .mes 投影争夺，避免 unknown direct child fault（ST 无该 API 时跳过）
+            // 输入框上方常驻：优先保持 wrapper 在 #form_sheld/#send_form 前，彻底脱离 #chat 虚拟化且更美观；找不到表单时回退
+            const $formAnchorChk = $('#form_sheld, #send_form').first();
+            if ($formAnchorChk.length) {
+                if ($wrapper[0].nextSibling !== $formAnchorChk[0]) $formAnchorChk.before($wrapper);
+                alignWrapperToMessageColumnNow();
+                return;
+            }
+            // 回退：无表单时按原 TT bounded 逻辑改挂 #sheld，避免 unknown direct child fault
             let _isTTBounded = false;
             try {
                 const _cs = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.chatSurface);
@@ -3661,32 +3668,39 @@ ${allTableNames.map(tName => {
         const config = getConfig();
         $('.acu-wrapper').remove();
         const $newContent = $(html);
-        // TT bounded 虚拟化：#chat > .acu-wrapper 会触发 unknown direct child fault（截图 Bounded ChatSurface 证据），
-        // 此时改挂 #sheld（#chat 的父容器，不在 virtualizer 管理集合），ST 无该 API 时短路走原路径
-        let isTTBounded = false;
-        try {
-            const cs = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.chatSurface);
-            if (cs && typeof cs.isManagedOwnershipRequired === 'function') isTTBounded = !!cs.isManagedOwnershipRequired();
-            else if (typeof localStorage !== 'undefined' && localStorage.getItem('chat_virtualization_enabled') === 'true') isTTBounded = true;
-        } catch (_) {}
-        if (isTTBounded) {
-            const $sheld = $('#sheld');
-            if ($sheld.length) $sheld.append($newContent);
-            else if ($chat.length && $chat.parent().length) $chat.parent().append($newContent);
-            else $('body').append($newContent);
+        // 布局：输入框正上方常驻（#form_sheld/#send_form 前），彻底脱离 #chat 虚拟化集合且更美观；
+        // ST/TT 双兼容：优先插到输入框前，找不到表单时再按原 frontendPosition 逻辑回退，TT bounded 时亦不进 #chat
+        const $formAnchor = $('#form_sheld, #send_form').first();
+        if ($formAnchor.length) {
+            $formAnchor.before($newContent);
             alignWrapperToMessageColumn();
-        } else if (config.frontendPosition === 'message') {
-             const $lastMes = $chat.find('.mes').last();
-             if ($lastMes.length) {
-                 const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
-                 $targetBlock.append($newContent);
-                 alignWrapperToMessageColumn();
-             } else {
-                 if ($chat.length) $chat.append($newContent); else $('body').append($newContent);
-             }
         } else {
-            if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
-            alignWrapperToMessageColumn();
+            // 回退：找不到输入框时走原分支（保留 message 依附末楼的语义），TT bounded 时已由外层 $formAnchor 覆盖，此处仅 ST 异常 DOM 回退
+            let isTTBounded = false;
+            try {
+                const cs = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.chatSurface);
+                if (cs && typeof cs.isManagedOwnershipRequired === 'function') isTTBounded = !!cs.isManagedOwnershipRequired();
+                else if (typeof localStorage !== 'undefined' && localStorage.getItem('chat_virtualization_enabled') === 'true') isTTBounded = true;
+            } catch (_) {}
+            if (isTTBounded) {
+                const $sheld = $('#sheld');
+                if ($sheld.length) $sheld.append($newContent);
+                else if ($chat.length && $chat.parent().length) $chat.parent().append($newContent);
+                else $('body').append($newContent);
+                alignWrapperToMessageColumn();
+            } else if (config.frontendPosition === 'message') {
+                 const $lastMes = $chat.find('.mes').last();
+                 if ($lastMes.length) {
+                     const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
+                     $targetBlock.append($newContent);
+                     alignWrapperToMessageColumn();
+                 } else {
+                     if ($chat.length) $chat.append($newContent); else $('body').append($newContent);
+                 }
+            } else {
+                if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
+                alignWrapperToMessageColumn();
+            }
         }
         // H-05 单例：首次创建三监听，后续仅更新目标，避免每帧 disconnect/new 开销
         ensureChatObservers($chat);
