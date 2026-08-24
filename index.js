@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.16'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.17'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -3621,18 +3621,23 @@ ${allTableNames.map(tName => {
                     alignWrapperToMessageColumnNow();
                 }
             } else {
-                // 滚动 + bottom：改挂末楼 mes_block 内，避免 #chat 直属触发 Bounded fault（与 JS-Slash-Runner 的 message-runtime 隔离）
-                const $lastMesSc = $chatNode.find('.mes').last();
-                if ($lastMesSc.length) {
-                    const $tbSc = $lastMesSc.find('.mes_block').length ? $lastMesSc.find('.mes_block') : $lastMesSc;
-                    if (!$tbSc.find('.acu-wrapper').length) $tbSc.append($wrapper);
-                    else if ($tbSc.children().last()[0] !== $wrapper[0]) $tbSc.append($wrapper);
+                // 滚动 + bottom：改挂 #sheld 末尾，随 #sheld 滚动且对齐仪表盘（避免 #chat 直属 fault）
+                const $sheldSc2 = $('#sheld');
+                if ($sheldSc2.length) {
+                    if ($sheldSc2.children().last()[0] !== $wrapper[0]) $sheldSc2.append($wrapper);
                 } else {
-                    const children = $chatNode.children();
-                    const lastChild = children.last()[0];
-                    if (lastChild && lastChild !== $wrapper[0]) {
-                        if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
-                            $chatNode.append($wrapper);
+                    const $lastMesSc = $chatNode.find('.mes').last();
+                    if ($lastMesSc.length) {
+                        const $tbSc = $lastMesSc.find('.mes_block').length ? $lastMesSc.find('.mes_block') : $lastMesSc;
+                        if (!$tbSc.find('.acu-wrapper').length) $tbSc.append($wrapper);
+                        else if ($tbSc.children().last()[0] !== $wrapper[0]) $tbSc.append($wrapper);
+                    } else {
+                        const children = $chatNode.children();
+                        const lastChild = children.last()[0];
+                        if (lastChild && lastChild !== $wrapper[0]) {
+                            if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
+                                $chatNode.append($wrapper);
+                            }
                         }
                     }
                 }
@@ -3729,8 +3734,12 @@ ${allTableNames.map(tName => {
                 }
             }
         } else {
-            // scroll 模式：参照仪表盘，随聊天滚动；bottom 也改挂末楼 mes_block 内，避免 #chat 直属触发 Bounded fault
-            if (config.frontendPosition === 'message') {
+            // scroll 模式：参照仪表盘/选项，随 #sheld 滚动（与嵌入式仪表盘同容器），避免 #chat 直属 fault 且对齐良好
+            const $sheldScTop = $('#sheld');
+            if ($sheldScTop.length) {
+                $sheldScTop.append($newContent);
+                alignWrapperToMessageColumn();
+            } else if (config.frontendPosition === 'message') {
                  const $lastMes = $chat.find('.mes').last();
                  if ($lastMes.length) {
                      const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
