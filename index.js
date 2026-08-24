@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.21'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.22'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -1593,8 +1593,9 @@
                 .acu-embedded-dashboard-container .acu-dash-card { border-radius: 0 !important; box-shadow: none !important; border: none !important; margin: 0 !important; } @media (max-width: 768px) { .acu-embedded-dashboard-container .acu-dash-container { overflow: visible !important; height: auto !important; } } /* 全局隐藏仪表盘卡槽滚动条 (嵌入+悬浮) */ .acu-dash-npc-grid::-webkit-scrollbar, .acu-dash-char-info::-webkit-scrollbar { display: none !important; width: 0 !important; height: 0 !important; background: transparent !important; } .acu-dash-npc-grid, .acu-dash-char-info { scrollbar-width: none !important; -ms-overflow-style: none !important; } .acu-theme-aurora .acu-dash-card { background: rgba(30, 41, 59, 0.95) !important; } .acu-theme-starship .acu-dash-card { background: rgba(30, 27, 75, 0.95) !important; } .acu-theme-sky .acu-dash-card { background: rgba(240, 249, 255, 0.95) !important; } 
                 /* TT 增量：移动端 safe area / IME 视口补充；ST 无该变量时退化为 0，不影响布局 */
                 .acu-wrapper { padding-bottom: max(0px, var(--tt-ime-bottom, 0px)); }
-                /* 滚动模式长度对齐仪表盘/选项并略长：随末楼滚动时与嵌入式仪表盘同宽，左右各扩 3px（ barely noticeable ） */
-                .acu-wrapper.acu-tt-scroll { width: calc(100% + 6px) !important; margin-left: -3px !important; margin-right: -3px !important; box-sizing: border-box !important; }
+                /* 滚动模式面板宽度不再用 CSS 猜值：由 alignWrapperToMessageColumnNow 与仪表盘/选项
+                   同一测量对齐函数写入（planPanelAlignment，inset-3px），此处仅保留盒模型兜底 */
+                .acu-wrapper.acu-tt-scroll { box-sizing: border-box !important; }
             </style>
         `;
         $('head').append(styles);
@@ -3571,6 +3572,10 @@ ${allTableNames.map(tName => {
         const plans = [
             planPanelAlignment($('.acu-embedded-dashboard-container'), column, inset),
             planPanelAlignment($('.acu-embedded-options-container'), column, inset),
+            // 滚动模式主面板（acu-tt-scroll）：挂末楼 mes_block 内，与嵌入式仪表盘/选项同挂点，
+            // 用同一测量对齐机制（setProperty important），inset 减 3px = 比仪表盘略长且 barely noticeable。
+            // 固定模式 wrapper 挂 #form_sheld 前不参与正文列对齐（保持全宽），本选择器不命中。
+            planPanelAlignment($('.acu-wrapper.acu-tt-scroll'), column, Math.max(0, inset - 3)),
         ];
         for (const p of plans) applyPanelAlignment(p);
     };
