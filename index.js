@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.3.11'; // 与 manifest.json version 同步
+    const EXT_VERSION = '17.3.12'; // 与 manifest.json version 同步
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -3619,11 +3619,19 @@ ${allTableNames.map(tName => {
                     alignWrapperToMessageColumnNow();
                 }
             } else {
-                const children = $chatNode.children();
-                const lastChild = children.last()[0];
-                if (lastChild && lastChild !== $wrapper[0]) {
-                    if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
-                        $chatNode.append($wrapper);
+                // 滚动 + bottom：改挂末楼 mes_block 内，避免 #chat 直属触发 Bounded fault（与 JS-Slash-Runner 的 message-runtime 隔离）
+                const $lastMesSc = $chatNode.find('.mes').last();
+                if ($lastMesSc.length) {
+                    const $tbSc = $lastMesSc.find('.mes_block').length ? $lastMesSc.find('.mes_block') : $lastMesSc;
+                    if (!$tbSc.find('.acu-wrapper').length) $tbSc.append($wrapper);
+                    else if ($tbSc.children().last()[0] !== $wrapper[0]) $tbSc.append($wrapper);
+                } else {
+                    const children = $chatNode.children();
+                    const lastChild = children.last()[0];
+                    if (lastChild && lastChild !== $wrapper[0]) {
+                        if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
+                            $chatNode.append($wrapper);
+                        }
                     }
                 }
                 alignWrapperToMessageColumnNow();
@@ -3719,7 +3727,7 @@ ${allTableNames.map(tName => {
                 }
             }
         } else {
-            // scroll 模式：参照仪表盘，随聊天滚动
+            // scroll 模式：参照仪表盘，随聊天滚动；bottom 也改挂末楼 mes_block 内，避免 #chat 直属触发 Bounded fault
             if (config.frontendPosition === 'message') {
                  const $lastMes = $chat.find('.mes').last();
                  if ($lastMes.length) {
@@ -3730,7 +3738,13 @@ ${allTableNames.map(tName => {
                      if ($chat.length) $chat.append($newContent); else $('body').append($newContent);
                  }
             } else {
-                if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
+                const $lastMes2 = $chat.find('.mes').last();
+                if ($lastMes2.length) {
+                    const $tb2 = $lastMes2.find('.mes_block').length ? $lastMes2.find('.mes_block') : $lastMes2;
+                    $tb2.append($newContent);
+                } else {
+                    if ($chat.length) $chat.append($newContent); else $('body').append($newContent);
+                }
                 alignWrapperToMessageColumn();
             }
         }
