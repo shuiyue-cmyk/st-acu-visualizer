@@ -3592,9 +3592,9 @@ ${allTableNames.map(tName => {
             planPanelAlignment($('.acu-embedded-dashboard-container'), column, inset),
             planPanelAlignment($('.acu-embedded-options-container'), column, inset),
             // 滚动模式主面板（acu-tt-scroll）：挂末楼 mes_block 内，与嵌入式仪表盘/选项同挂点，
-            // 用同一测量对齐机制（setProperty important），inset 减 3px = 比仪表盘略长且 barely noticeable。
+            // 用同一测量对齐机制（setProperty important），inset 减 6px = 比仪表盘略长且可感知。
             // 固定模式 wrapper 挂 #form_sheld 前不参与正文列对齐（保持全宽），本选择器不命中。
-            planPanelAlignment($('.acu-wrapper.acu-tt-scroll'), column, Math.max(0, inset - 3)),
+            planPanelAlignment($('.acu-wrapper.acu-tt-scroll'), column, Math.max(0, inset - 6)),
         ];
         for (const p of plans) applyPanelAlignment(p);
     };
