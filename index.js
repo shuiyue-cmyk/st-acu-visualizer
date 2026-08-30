@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.4.2'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.4.3'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -3608,7 +3608,8 @@ ${allTableNames.map(tName => {
             const currentConfig = getConfig();
             const $chatNode = $('#chat');
             const $wrapper = $('.acu-wrapper');
-            if (!$chatNode.length || !$wrapper.length) return;
+            if (!$chatNode.length) return;
+            if (!$wrapper.length) { try { renderInterface(true); } catch (_) {} return; }
             // TT 适配（仅虚拟化开启时生效）：fixed=输入框上方常驻；scroll 落入下方 message/bottom 常规分支
             const isTTBoundedM = detectTTBounded();
             if (isTTBoundedM && (currentConfig.ttPanelMode || 'fixed') === 'fixed') {
@@ -3647,12 +3648,17 @@ ${allTableNames.map(tName => {
                 }
                 alignWrapperToMessageColumnNow();
             } else {
-                // 原生 bottom（无虚拟化）：保持 #chat 末尾随聊挂载的原逻辑
-                const children = $chatNode.children();
-                const lastChild = children.last()[0];
-                if (lastChild && lastChild !== $wrapper[0]) {
-                    if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
-                        $chatNode.append($wrapper);
+                // 原生 bottom（无虚拟化）：改挂 #sheld 避免被 clearChat 删除
+                const $sheldC2 = $('#sheld');
+                if ($sheldC2.length) {
+                    if ($sheldC2.children().last()[0] !== $wrapper[0]) $sheldC2.append($wrapper);
+                } else {
+                    const children = $chatNode.children();
+                    const lastChild = children.last()[0];
+                    if (lastChild && lastChild !== $wrapper[0]) {
+                        if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
+                            $chatNode.append($wrapper);
+                        }
                     }
                 }
                 alignWrapperToMessageColumnNow();
@@ -3751,10 +3757,17 @@ ${allTableNames.map(tName => {
                  $targetBlock.append($newContent);
                  alignWrapperToMessageColumn();
              } else {
-                 if ($chat.length) $chat.append($newContent); else $('body').append($newContent);
+                 const $sheldM = $('#sheld');
+                 if ($sheldM.length) $sheldM.append($newContent);
+                 else if ($chat.length && $chat.parent().length) $chat.parent().append($newContent);
+                 else $('body').append($newContent);
              }
         } else {
-            if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
+            // 原生 bottom（无虚拟化）：改挂 #sheld 避免被 clearChat 的 children().remove() 连带删除
+            const $sheldB = $('#sheld');
+            if ($sheldB.length) $sheldB.append($newContent);
+            else if ($chat.length && $chat.parent().length) $chat.parent().append($newContent);
+            else $('body').append($newContent);
             alignWrapperToMessageColumn();
         }
         // H-05 单例：首次创建三监听，后续仅更新目标，避免每帧 disconnect/new 开销
