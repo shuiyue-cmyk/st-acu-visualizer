@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.4.5'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.4.6'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -30,6 +30,8 @@
 
     let isInitialized = false;
     let isSaving = false;
+    // 批量 deleteRow 循环进行中：挂起 handleUpdate（见刷新按钮流程注释）
+    let bulkOpActive = false;
     let isEditingOrder = false;
     let currentDiffMap = new Set();
     let observer = null;
@@ -93,6 +95,8 @@
             // 会挡住 DB 在填表结束时发的 _notifyTableUpdate，导致表格更新了前端没刷新。
             // 填表流程的更新通知应始终放行。
             if (isEditingOrder) return;
+            // 批量删循环期间的通知直接吞掉：循环结束会统一全量重拉，避免中间态被回灌
+            if (bulkOpActive) return;
             // 通知到达 = DB 数据已更新：失效全部缓存，走 renderInterface(true) 让 getTableData(true)
             // 从 DB 统一 clone + 重算 diffMap（若走 renderInterface(false)，getTableData(false) 缓存
             // 命中会重置 lastTableDataRefreshed，diffMap 高亮陈旧——交叉验证确认的缺陷）。
@@ -104,6 +108,10 @@
             // 恢复全量重拉(cachedTableData=null):指纹采样会漏检 DB 侧中间行/删表修改(第二轮审查
             // P1-1-A/B 实证),全量 clone ~6ms 可接受;fillPoll/catchupPoll 仍走 partial 保性能。
             cachedTableData = null;
+            // 外部数据变更 = 行下标可能位移：清掉按「点击时刻下标」记录的待删/选中态，
+            // 否则确认删除时会按旧下标删错行（9.0 row_id 为稳定身份，前端只有下标）。
+            pendingDeletes.clear();
+            selectedRows.clear();
             renderInterface(true);
         }
     };
@@ -1661,20 +1669,21 @@
         catch (e1) {
             try { return JSON.parse(JSON.stringify(data)); }
             catch (e2) {
-                console.warn('[ACU-UI] cloneTableData failed, returning shallow sheet shell:', e2);
-                // 最后兜底：按 sheet 浅拷贝 content 引用，至少保证读路径可用；
-                // 写路径仍应走 API 而非就地改写。
+                console.warn('[ACU-UI] cloneTableData failed, returning detached sheet shell:', e2);
+                // 最后兜底：按 sheet 浅拷贝 + content 逐行 slice（字符串是不可变原语可安全共享）。
+                // 绝不返回 DB 活引用（9.0 exportTableAsJson 返回 currentJsonTableData_ACU 本体，
+                // 就地写会绕过 DB 事务/校验/引用替换）。连这都失败则返回 null，宁可不缓存。
                 const shell = {};
                 try {
                     for (const k of Object.keys(data)) {
                         const v = data[k];
                         if (v && typeof v === 'object' && Array.isArray(v.content)) {
-                            shell[k] = { ...v, content: v.content };
+                            shell[k] = { ...v, content: v.content.map(r => Array.isArray(r) ? r.slice() : r) };
                         } else {
                             shell[k] = v;
                         }
                     }
-                } catch (_) { return data; }
+                } catch (_) { return null; }
                 return shell;
             }
         }
@@ -1717,7 +1726,9 @@
     // 填表/追平期间通常只有 1-2 张表在变,其余表(如 8.3MB 里的历史大表)不再每次深拷贝。
     const cloneTableDataPartial = (raw, oldCached) => {
         if (!raw || typeof raw !== 'object') return raw;
-        const cloneOne = (v) => { try { return structuredClone(v); } catch (_) { try { return JSON.parse(JSON.stringify(v)); } catch (__) { return v; } } };
+        // cloneOne 双失败时返回 undefined（绝不返回 v——那会把 DB 活引用漏进缓存，
+        // 后续就地写直接改 DB 运行时视图）；调用方检测到 undefined 退回全量克隆兜底。
+        const cloneOne = (v) => { try { return structuredClone(v); } catch (_) { try { return JSON.parse(JSON.stringify(v)); } catch (__) { return undefined; } } };
         try {
             const newFp = sheetFingerprints(raw);
             const oldFp = sheetFingerprints(oldCached);
@@ -1737,9 +1748,11 @@
             if (!anyChanged && oldCached) return oldCached; // 指纹全同 = 数据未动,直接复用旧缓存
             const out = {};
             for (const k of Object.keys(raw)) {
-                if (!k.startsWith('sheet_')) { out[k] = cloneOne(raw[k]); continue; } // 非 sheet 元数据克隆
+                if (!k.startsWith('sheet_')) { const c0 = cloneOne(raw[k]); if (c0 === undefined) return cloneTableData(raw); out[k] = c0; continue; } // 非 sheet 元数据克隆
                 if (!oldCached || newFp[k] !== oldFp[k]) {
-                    out[k] = cloneOne(raw[k]); // 变化表(或无旧缓存):克隆新副本
+                    const c1 = cloneOne(raw[k]); // 变化表(或无旧缓存):克隆新副本
+                    if (c1 === undefined) return cloneTableData(raw); // 双失败退回全量克隆(其兜底逐行 slice,不漏 DB 引用)
+                    out[k] = c1;
                 } else {
                     out[k] = oldCached[k]; // 未变化表:复用旧缓存引用(读路径只读,安全)
                 }
@@ -1830,19 +1843,18 @@
         } catch (_) { return ''; }
     };
 
-    const saveDataToDatabase = async (tableData, skipRender = false, commitDeletes = false, updateContext = null) => {
+    const saveDataToDatabase = async (tableData, skipRender = false, updateContext = null) => {
         if (isSaving) return false;
         if (tableData && typeof tableData === 'object') {
             if (!tableData.mate) {
                 tableData.mate = { type: 'chatSheets', version: 1 };
             }
+            // 9.0 存储契约：顶层键必须是导出视图里的 sheet_* 稳定键。自造随机键会与
+            // DB 的稳定 sheetKey（显示名 slug）身份归并冲突/物理表名碰撞，一律拒绝保存。
             if (!Object.keys(tableData).some(k => k.startsWith('sheet_'))) {
-                if (tableData.content && tableData.name) {
-                    const tempKey = tableData.uid || ('sheet_' + Math.random().toString(36).substr(2, 9));
-                    const wrapper = { mate: { type: 'chatSheets', version: 1 } };
-                    wrapper[tempKey] = tableData;
-                    tableData = wrapper;
-                }
+                console.warn('[ACU-API] 保存被拒：数据缺少 sheet_* 顶层键（不自造随机 sheetKey，避免与 DB 9.0 身份契约冲突）');
+                if (window.toastr) window.toastr.error('保存被拒：表格数据结构异常，请刷新后重试。');
+                return false;
             }
         }
         const { $ } = getCore();
@@ -1853,6 +1865,7 @@
             isSaving = true;
             const api = getCore().getDB();
             let saveSuccessful = false;
+            let preciseRejected = false;
 
             try {
                 if (api && updateContext) {
@@ -1866,13 +1879,24 @@
                     }
                     if (apiResult !== false) {
                         saveSuccessful = true;
+                    } else {
+                        preciseRejected = true;
                     }
                 }
             } catch (apiErr) {
+                preciseRejected = true;
                 console.warn('[ACU-API] API 调用失败:', apiErr);
             }
 
-            if (!saveSuccessful && api && api.importTableAsJson) {
+            // 9.0 存储护栏：import 是全量 data_replace（绕过表锁/填表互斥，陈旧克隆会整库回退
+            // 并重建 SQLite 引擎）。有精确写 API 时绝不降级全量——被拒即如实报错；
+            // 仅当 DB 完全没有精确 API（旧版）时 import 才是合法通道。
+            const hasPreciseApi = !!(api && (api.updateCell || api.updateRow || api.deleteRow || api.insertRow));
+            if (!saveSuccessful && preciseRejected && hasPreciseApi) {
+                if (window.toastr) window.toastr.error('保存被数据库拒绝：表格可能被锁定或正在填表，请稍后重试。');
+                return false;
+            }
+            if (!saveSuccessful && !hasPreciseApi && api && api.importTableAsJson) {
                 try {
                     saveSuccessful = await api.importTableAsJson(JSON.stringify(tableData));
                 } catch (bulkErr) {
@@ -4341,15 +4365,24 @@ const checkRowChanged = (realIdx, row) => {
                     }
                     let failedRows = 0;
                     let failedTableNames = [];
-                    for (const t in group) {
-                        const rows = group[t].sort((a,b) => b - a);
-                        for (const r of rows) {
-                            try {
-                                const res = await api.deleteRow(t, r + 1);
-                                // DB 8.9 deleteRow 只返回 true/false；放宽为 res !== true 防御未来返回 -1 等
-                                if (res !== true) { failedRows++; if (!failedTableNames.includes(t)) failedTableNames.push(t); }
-                            } catch (e) { failedRows++; if (!failedTableNames.includes(t)) failedTableNames.push(t); console.warn('[ACU-API] deleteRow 失败:', e); }
+                    // 批量删期间挂起 handleUpdate：循环中每次 deleteRow 都触发 DB 通知，
+                    // 通知到达时 deleteRow 的 await 未落定，getTableData(true) 会拉到中间态，
+                    // 该中间态一旦被写路径回灌就是 data_replace 冲突源（DB 作者指出的高危模式）。
+                    // 循环结束统一全量重拉刷新，挂起期间到达的通知视作已覆盖。
+                    bulkOpActive = true;
+                    try {
+                        for (const t in group) {
+                            const rows = group[t].sort((a,b) => b - a);
+                            for (const r of rows) {
+                                try {
+                                    const res = await api.deleteRow(t, r + 1);
+                                    // DB 8.9 deleteRow 只返回 true/false；放宽为 res !== true 防御未来返回 -1 等
+                                    if (res !== true) { failedRows++; if (!failedTableNames.includes(t)) failedTableNames.push(t); }
+                                } catch (e) { failedRows++; if (!failedTableNames.includes(t)) failedTableNames.push(t); console.warn('[ACU-API] deleteRow 失败:', e); }
+                            }
                         }
+                    } finally {
+                        bulkOpActive = false;
                     }
                     pendingDeletes.clear();
                     isMultiSelectMode = false;
@@ -4579,6 +4612,9 @@ const checkRowChanged = (realIdx, row) => {
                     lastRawTableRef = null;
                     lastTableSetFingerprint = '';
                     currentDiffMap.clear();
+                    // 追平结束全量重拉：行下标已重排，清按旧下标的待删/选中态防删错行
+                    pendingDeletes.clear();
+                    selectedRows.clear();
                     try { const d = getTableData(true); if (d) saveSnapshot(d); } catch (e) { console.error('[ACU] 追平结束重拉失败:', e); }
                     try { renderInterface(true); } catch (e) { console.error('[ACU] 追平结束刷新失败:', e); }
                     if (window.toastr) window.toastr.success(saved ? '追平完成，数据已刷新。' : '追平结束，数据已刷新。', { timeOut: 2500 });
@@ -4609,6 +4645,9 @@ const checkRowChanged = (realIdx, row) => {
                             lastRawTableRef = null;
                             lastTableSetFingerprint = '';
                             lastTableDataRefreshed = true;
+                            // 追平写入会增删行：按旧下标的待删/选中态失效，防止确认删除删错行
+                            pendingDeletes.clear();
+                            selectedRows.clear();
                             try { renderInterface(true); } catch (e) { console.error('[ACU] 追平即时刷新失败:', e); }
                         } else {
                             catchupStable++;
@@ -4891,7 +4930,7 @@ const checkRowChanged = (realIdx, row) => {
                           cacheSheet.content[rowIdx + 1][colIdx] = newVal;
                       }
                       rawData[tableKey].content[rowIdx + 1][colIdx] = newVal;
-                      const ok = await saveDataToDatabase(rawData, true, false, {
+                      const ok = await saveDataToDatabase(rawData, true, {
                           type: 'cell_edit',
                           tableName: tableName,
                           rowIndex: rowIdx,
@@ -4925,7 +4964,8 @@ const checkRowChanged = (realIdx, row) => {
                     const colName = headers[c];
                     if (!colName) continue;
                     // row_id 列跳过，交给 DB 自增；其余列置空。
-                    if (colName === 'row_id' || colName === 'row_id ' || /行号|行ID|编号/i.test(colName)) continue;
+                    // 只认 row_id/首列——正则匹配「编号」会误跳「道具编号」等合法业务列。
+                    if (c === 0 || colName === 'row_id' || colName === 'row_id ') continue;
                     newRowObj[colName] = '';
                 }
                 const api = getCore().getDB();
@@ -4943,7 +4983,7 @@ const checkRowChanged = (realIdx, row) => {
                     const newRow = headers.map(() => '');
                     sheet.content.push(newRow);
                     let savedOk = false;
-                    try { savedOk = (await saveDataToDatabase(rawData, false, true)) !== false; } catch (e) { console.warn('[ACU-API] 兜底保存异常:', e); }
+                    try { savedOk = (await saveDataToDatabase(rawData, false)) !== false; } catch (e) { console.warn('[ACU-API] 兜底保存异常:', e); }
                     if (!savedOk) {
                         sheet.content.pop(); // 保存失败:回滚幻影行,避免缓存残留
                         if (window.toastr) window.toastr.error('插入新行失败，已回滚。');
@@ -5033,7 +5073,7 @@ const checkRowChanged = (realIdx, row) => {
                     }
                 });
                 if (hasChanges) {
-                    const ok = await saveDataToDatabase(currentData, false, false, {
+                    const ok = await saveDataToDatabase(currentData, false, {
                         type: 'row_edit',
                         tableName: tableName,
                         rowIndex: rowIndex,
@@ -5364,6 +5404,9 @@ const checkRowChanged = (realIdx, row) => {
                     lastRawTableRef = null;
                     lastTableSetFingerprint = '';
                     lastTableDataRefreshed = true;
+                    // 填表写入会增删行：按旧下标的待删/选中态失效，防止确认删除删错行
+                    pendingDeletes.clear();
+                    selectedRows.clear();
                     renderInterface(true);
                 } else {
                     fillPollStable++;
@@ -5389,7 +5432,9 @@ const checkRowChanged = (realIdx, row) => {
                      if (api.registerTableFillStartCallback) {
                          // 填表开始：存一份快照 + 启动稳定轮询（填表跑完自动兜底刷新）
                          api.registerTableFillStartCallback(() => {
-                             try { const c = api.exportTableAsJson(); if (c) saveSnapshot(c); } catch (_) {}
+                             // exportTableAsJson 返回 DB 活引用，快照必须克隆（与 :5416 语义对齐），
+                             // 否则填表期 DB 原地更新会使高亮基线漂移
+                             try { const c = api.exportTableAsJson(); if (c) saveSnapshot(cloneTableData(c)); } catch (_) {}
                              startFillPoll();
                          });
                      }
