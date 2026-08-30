@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.4.3'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.4.4'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -3648,10 +3648,10 @@ ${allTableNames.map(tName => {
                 }
                 alignWrapperToMessageColumnNow();
             } else {
-                // 原生 bottom（无虚拟化）：改挂 #sheld 避免被 clearChat 删除
-                const $sheldC2 = $('#sheld');
-                if ($sheldC2.length) {
-                    if ($sheldC2.children().last()[0] !== $wrapper[0]) $sheldC2.append($wrapper);
+                // 原生 bottom（无虚拟化）：保持在输入框上方（#form_sheld 前），不被 clearChat 删除
+                const $formAnchorN = $('#form_sheld, #send_form').first();
+                if ($formAnchorN.length) {
+                    if ($wrapper[0].nextSibling !== $formAnchorN[0]) $formAnchorN.before($wrapper);
                 } else {
                     const children = $chatNode.children();
                     const lastChild = children.last()[0];
@@ -3743,9 +3743,9 @@ ${allTableNames.map(tName => {
                 $tbS.append($newContent);
             } else {
                 // bounded 下禁止直挂 #chat（unknown direct child fault，偶发根因）：
-                // 无可见楼层时改挂 #sheld/$chat.parent()，待首楼出现后由归位逻辑迁入
-                const $sheldS = $('#sheld');
-                if ($sheldS.length) $sheldS.append($newContent);
+                // 无可见楼层时钉输入框上方，待首楼出现后由归位逻辑迁入末楼
+                const $formAnchorS = $('#form_sheld, #send_form').first();
+                if ($formAnchorS.length) $formAnchorS.before($newContent);
                 else if ($chat.length && $chat.parent().length) $chat.parent().append($newContent);
                 else $('body').append($newContent);
             }
@@ -3757,16 +3757,19 @@ ${allTableNames.map(tName => {
                  $targetBlock.append($newContent);
                  alignWrapperToMessageColumn();
              } else {
-                 const $sheldM = $('#sheld');
-                 if ($sheldM.length) $sheldM.append($newContent);
-                 else if ($chat.length && $chat.parent().length) $chat.parent().append($newContent);
+                 // 无楼层回退：输入框上方（与 bottom 同锚点，#chat 外不被 clearChat 删）
+                 const $formAnchorM = $('#form_sheld, #send_form').first();
+                 if ($formAnchorM.length) $formAnchorM.before($newContent);
+                 else if ($chat.length) $chat.append($newContent);
                  else $('body').append($newContent);
              }
         } else {
-            // 原生 bottom（无虚拟化）：改挂 #sheld 避免被 clearChat 的 children().remove() 连带删除
-            const $sheldB = $('#sheld');
-            if ($sheldB.length) $sheldB.append($newContent);
-            else if ($chat.length && $chat.parent().length) $chat.parent().append($newContent);
+            // 原生 bottom（无虚拟化）：钉在输入框上方（#form_sheld 前）——在 #chat 外不被
+            // clearChat 的 children().remove() 连带删除（进角色卡消失根因），视觉仍在聊天区底部
+            // 而非屏幕最底部（#sheld append 会落到输入框下方）；无表单锚点时回退原 #chat 末尾。
+            const $formAnchorB = $('#form_sheld, #send_form').first();
+            if ($formAnchorB.length) $formAnchorB.before($newContent);
+            else if ($chat.length) { $chat.append($newContent); }
             else $('body').append($newContent);
             alignWrapperToMessageColumn();
         }
