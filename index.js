@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.4.4'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.4.5'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -3648,17 +3648,12 @@ ${allTableNames.map(tName => {
                 }
                 alignWrapperToMessageColumnNow();
             } else {
-                // 原生 bottom（无虚拟化）：保持在输入框上方（#form_sheld 前），不被 clearChat 删除
-                const $formAnchorN = $('#form_sheld, #send_form').first();
-                if ($formAnchorN.length) {
-                    if ($wrapper[0].nextSibling !== $formAnchorN[0]) $formAnchorN.before($wrapper);
-                } else {
-                    const children = $chatNode.children();
-                    const lastChild = children.last()[0];
-                    if (lastChild && lastChild !== $wrapper[0]) {
-                        if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
-                            $chatNode.append($wrapper);
-                        }
+                // 原生 bottom（无虚拟化）：恢复原 #chat 末尾随聊挂载逻辑（原生位置样式）
+                const children = $chatNode.children();
+                const lastChild = children.last()[0];
+                if (lastChild && lastChild !== $wrapper[0]) {
+                    if ($(lastChild).hasClass('mes') || $(lastChild).hasClass('message-body')) {
+                        $chatNode.append($wrapper);
                     }
                 }
                 alignWrapperToMessageColumnNow();
@@ -3757,20 +3752,14 @@ ${allTableNames.map(tName => {
                  $targetBlock.append($newContent);
                  alignWrapperToMessageColumn();
              } else {
-                 // 无楼层回退：输入框上方（与 bottom 同锚点，#chat 外不被 clearChat 删）
-                 const $formAnchorM = $('#form_sheld, #send_form').first();
-                 if ($formAnchorM.length) $formAnchorM.before($newContent);
-                 else if ($chat.length) $chat.append($newContent);
-                 else $('body').append($newContent);
+                 // 无楼层回退：原 #chat 末尾（原生语义）；进卡被 clearChat 删由 handleChatMutation 缺失重建自愈
+                 if ($chat.length) $chat.append($newContent); else $('body').append($newContent);
              }
         } else {
-            // 原生 bottom（无虚拟化）：钉在输入框上方（#form_sheld 前）——在 #chat 外不被
-            // clearChat 的 children().remove() 连带删除（进角色卡消失根因），视觉仍在聊天区底部
-            // 而非屏幕最底部（#sheld append 会落到输入框下方）；无表单锚点时回退原 #chat 末尾。
-            const $formAnchorB = $('#form_sheld, #send_form').first();
-            if ($formAnchorB.length) $formAnchorB.before($newContent);
-            else if ($chat.length) { $chat.append($newContent); }
-            else $('body').append($newContent);
+            // 原生 bottom（无虚拟化）：恢复原 #chat 末尾随聊挂载（用户拍板：未开虚拟化保持原生位置样式，
+            // 不与虚拟化 fixed 的输入框上方钉挂混淆）。进角色卡 clearChat 的 children().remove() 会连带删除
+            // wrapper，由 handleChatMutation 的缺失重建（renderInterface(true)）在下一次突变批次自愈。
+            if ($chat.length) { $chat.append($newContent); } else { $('body').append($newContent); }
             alignWrapperToMessageColumn();
         }
         // H-05 单例：首次创建三监听，后续仅更新目标，避免每帧 disconnect/new 开销
