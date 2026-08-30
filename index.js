@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.4.6'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.4.7'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -32,6 +32,8 @@
     let isSaving = false;
     // 批量 deleteRow 循环进行中：挂起 handleUpdate（见刷新按钮流程注释）
     let bulkOpActive = false;
+    // meta.persisted=false 提示的节流时间戳
+    let lastUnpersistedToastTs = 0;
     let isEditingOrder = false;
     let currentDiffMap = new Set();
     let observer = null;
@@ -90,13 +92,17 @@
             }
             return result;
         },
-        handleUpdate: (incomingData) => {
+        handleUpdate: (incomingData, meta) => {
             // 不再让 _suppressNext 吞掉 DB 的填表完成通知：前一次保存的 2 秒抑制窗口
             // 会挡住 DB 在填表结束时发的 _notifyTableUpdate，导致表格更新了前端没刷新。
             // 填表流程的更新通知应始终放行。
             if (isEditingOrder) return;
             // 批量删循环期间的通知直接吞掉：循环结束会统一全量重拉，避免中间态被回灌
             if (bulkOpActive) return;
+            // DB 9.0 通知第二参 meta.persisted=false 表示本次更新只改了运行时内存、
+            // 未落盘聊天（如 restore/运行时导入）——照常刷新但提示重载后会消失，
+            // 避免用户把内存态误当已保存。
+            const notPersisted = !!(meta && meta.persisted === false);
             // 通知到达 = DB 数据已更新：失效全部缓存，走 renderInterface(true) 让 getTableData(true)
             // 从 DB 统一 clone + 重算 diffMap（若走 renderInterface(false)，getTableData(false) 缓存
             // 命中会重置 lastTableDataRefreshed，diffMap 高亮陈旧——交叉验证确认的缺陷）。
@@ -113,6 +119,10 @@
             pendingDeletes.clear();
             selectedRows.clear();
             renderInterface(true);
+            if (notPersisted && window.toastr && Date.now() - lastUnpersistedToastTs > 5000) {
+                lastUnpersistedToastTs = Date.now();
+                window.toastr.warning('已刷新为运行时数据（未保存到聊天，重载页面后会消失）。', { timeOut: 4000 });
+            }
         }
     };
 
@@ -141,7 +151,6 @@
         dbTransparentMap: {},
         dbAppleGlass: false,
         dbAccent: 'blue',
-        debugMode: false,
         dbGlassStyle: 'off',
         ttPanelMode: 'fixed'
     };
@@ -399,100 +408,6 @@
     const saveTableStyles = (styles) => { tableStylesCache = styles ? { ...styles } : null; try { localStorage.setItem(STORAGE_KEY_TABLE_STYLES, JSON.stringify(styles)); } catch (e) { console.error(e); } };
     const getDashConfig = () => { if (dashConfigCache !== null) return { ...dashConfigCache }; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_DASH_CONFIG)) || {}; dashConfigCache = v; return { ...v }; } catch (e) { return {}; } };
     const saveDashConfig = (cfg) => { dashConfigCache = cfg ? { ...cfg } : null; try { localStorage.setItem(STORAGE_KEY_DASH_CONFIG, JSON.stringify(cfg)); } catch (e) { console.error(e); } };
-
-    // ── 调试报告采集(T29):用户遇可复现问题可开「调试模式」→ 复现 → 生成报告 →
-    //    打开 GitHub 预填 issue 页提交(无 token,数据只在用户浏览器与 GitHub 间流转)。
-    const debugErrors = [];
-    const debugLongTasks = [];
-    let debugObs = null;
-    let debugErrorsHooked = false;
-    let debugOrigConsoleError = null;
-
-    const debugOnError = (e) => {
-        if (debugErrors.length < 50) debugErrors.push({ t: Date.now(), msg: String(e.message || '').slice(0, 300), src: (e.filename || '').slice(-80), line: e.lineno });
-    };
-    const debugConsoleError = function () {
-        try { if (debugErrors.length < 50) debugErrors.push({ t: Date.now(), msg: Array.prototype.slice.call(arguments).map(a => { try { return typeof a === 'string' ? a : JSON.stringify(a); } catch (_) { return String(a); } }).join(' ').slice(0, 300) }); } catch (_) {}
-        return debugOrigConsoleError ? debugOrigConsoleError.apply(console, arguments) : undefined;
-    };
-
-    const debugHook = () => {
-        if (debugErrorsHooked) return;
-        debugErrorsHooked = true;
-        // 收集运行时错误(带时间戳)
-        try {
-            window.addEventListener('error', debugOnError);
-            debugOrigConsoleError = console.error;
-            console.error = debugConsoleError;
-        } catch (_) {}
-        // 长任务采集(>50ms 阻塞主线程 = 卡顿信号)
-        try {
-            if (typeof PerformanceObserver === 'function') {
-                debugObs = new PerformanceObserver((list) => {
-                    list.getEntries().forEach((en) => { if (debugLongTasks.length < 50) debugLongTasks.push({ ms: Math.round(en.duration), t: Date.now() }); });
-                });
-                debugObs.observe({ entryTypes: ['longtask'] });
-            }
-        } catch (_) {}
-    };
-
-    const debugUnhook = () => {
-        try { if (debugObs) { debugObs.disconnect(); debugObs = null; } } catch (_) {}
-        try { window.removeEventListener('error', debugOnError); } catch (_) {}
-        try { if (debugOrigConsoleError) { console.error = debugOrigConsoleError; debugOrigConsoleError = null; } } catch (_) {}
-        debugErrorsHooked = false;
-    };
-
-    const collectDebugReport = () => {
-        const { $ } = getCore();
-        const env = (typeof window !== 'undefined') ? window : {};
-        const ua = (typeof navigator !== 'undefined' && navigator.userAgent) ? navigator.userAgent : '';
-        // 环境信息
-        const report = {
-            time: new Date().toISOString(),
-            extVersion: EXT_VERSION,
-            ua: ua.slice(0, 300),
-            isTT: (window.__TAURITAVERN__) ? 'TauriTavern(TT)' : (/Tencent|MicroMessenger|QQ\//.test(ua) ? '可能(QQ/微信容器)' : (window.top !== window.self ? 'iframe' : '否')),
-            screen: (env.screen ? env.screen.width + 'x' + env.screen.height : '?') + ' dpr=' + (env.devicePixelRatio || 1),
-            viewport: (env.innerWidth || '?') + 'x' + (env.innerHeight || '?'),
-            stVersion: (env.SillyTavern && (env.SillyTavern.info ? (env.SillyTavern.info.version || '') : '')) || (env.ST ? 'ST存在' : ''),
-            memory: (typeof performance !== 'undefined' && performance.memory) ? { used: Math.round(performance.memory.usedJSHeapSize / 1048576) + 'MB', total: Math.round(performance.memory.jsHeapSizeLimit / 1048576) + 'MB' } : 'n/a',
-            errors: debugErrors.slice(-20),
-            longTasks: debugLongTasks.slice(-20),
-            domNodes: ($ ? $('body *').length : -1),
-            acuWrappers: ($ ? $('.acu-wrapper').length : -1),
-            glassInjected: !!document.getElementById('acu-v2-apple'),
-            configKeys: (() => { try { const c = JSON.parse(localStorage.getItem(STORAGE_KEY_UI_CONFIG)); return c ? Object.keys(c).filter(k => !/snapshot/i.test(k)) : []; } catch (_) { return []; } })(),
-        };
-        // 注入是否生效(DB UI 挂载时)
-        try {
-            const root = document.getElementById('acu-app-v2');
-            report.dbUiMounted = !!root;
-            if (root) {
-                const cs = window.getComputedStyle(root);
-                report.dbUiBg0 = cs.getPropertyValue('--acu-bg-0').trim() || 'n/a';
-                report.dbUiBackdrop = cs.backdropFilter || 'none';
-            } else {
-                report.dbUiBg0 = 'n/a (DB UI 未挂载)';
-                report.dbUiBackdrop = 'n/a';
-            }
-        } catch (_) {}
-        return report;
-    };
-
-    const genDebugIssueUrl = () => {
-        const report = collectDebugReport();
-        const title = '[调试报告] ' + report.time;
-        const body = '环境: ' + report.ua.slice(0, 120) + '\n'
-            + '扩展版本: ' + report.extVersion + ' | ST: ' + report.stVersion + ' | TT: ' + report.isTT + '\n'
-            + '屏幕: ' + report.screen + ' | 视口: ' + report.viewport + ' | 内存: ' + (typeof report.memory === 'string' ? report.memory : JSON.stringify(report.memory)) + '\n'
-            + 'DOM节点: ' + report.domNodes + ' | DB UI挂载: ' + report.dbUiMounted + ' | 注入生效: ' + report.glassInjected + '\n'
-            + 'DB bg0: ' + report.dbUiBg0 + ' | DB backdrop: ' + report.dbUiBackdrop + '\n\n'
-            + '复现步骤: (请填写)\n\n'
-            + '```json\n' + JSON.stringify(report, null, 2) + '\n```';
-        return 'https://github.com/shuiyue-cmyk/st-acu-visualizer/issues/new?title=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(body);
-    };
-
 
     const getReverseOrderTables = () => { if (reverseTablesCache !== null) return [...reverseTablesCache]; try { const v = JSON.parse(localStorage.getItem(STORAGE_KEY_REVERSE_TABLES)) || []; reverseTablesCache = v; return [...v]; } catch (e) { return []; } };
     const saveReverseOrderTables = (list) => { reverseTablesCache = list ? [...list] : list; try { localStorage.setItem(STORAGE_KEY_REVERSE_TABLES, JSON.stringify(list)); } catch (e) { console.error(e); } };
@@ -2434,29 +2349,9 @@ ${allTableNames.map(tName => {
                             <button class="acu-btn-block" id="btn-enter-sort" style="margin:0; flex:1; justify-content:center; font-weight:bold; padding:12px;">进入表格排序模式</button>
                         </div>
 
-                        <div class="acu-section-header" data-target="sec-debug"><div class="acu-section-title"><i class="fa-solid fa-bug"></i> 调试</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-debug"><div class="acu-settings-group">
-                            <div class="acu-control-row">
-                                <div class="acu-label-col" style="flex-direction:row;align-items:center;gap:8px"><span class="acu-label-main">调试模式</span><span class="acu-label-sub" style="font-weight:normal;margin-top:2px">采集错误/长任务,用于复现卡顿等问题</span></div>
-                                <div class="acu-input-col">
-                                    <label class="acu-switch">
-                                        <input type="checkbox" id="cfg-debug-mode" ${config.debugMode ? 'checked' : ''}>
-                                        <span class="acu-slider-switch"></span>
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="acu-control-row">
-                                <div class="acu-label-col"><span class="acu-label-main">调试报告</span><span class="acu-label-sub" style="font-weight:normal">开启调试模式→复现问题→生成报告,自动打开 GitHub 预填 issue 页提交</span></div>
-                                <div class="acu-input-col" style="justify-content:flex-end; gap:8px">
-                                    <button class="acu-btn-block" id="btn-gen-debug-report" style="margin:0; padding:8px 14px; width:auto;">生成报告</button>
-                                    <a href="https://github.com/shuiyue-cmyk/st-acu-visualizer" target="_blank" rel="noopener noreferrer" class="acu-btn-block" style="margin:0; padding:8px 14px; width:auto; text-decoration:none; display:inline-flex; align-items:center; gap:6px;"><i class="fa-solid fa-star"></i> 给项目点个星</a>
-                                </div>
-                            </div>
-                            <div class="acu-control-row" style="display:none;" id="row-debug-result">
-                                <div class="acu-input-col" style="width:100%;">
-                                    <a id="debug-issue-link" href="#" target="_blank" rel="noopener noreferrer" style="color:var(--acu-highlight); word-break:break-all; font-size:12px;">打开 GitHub issue 提交页</a>
-                                </div>
-                            </div>
-                        </div></div>
+                        <div style="display:flex; gap:10px; margin: 10px 0;">
+                            <a href="https://github.com/shuiyue-cmyk/st-acu-visualizer" target="_blank" rel="noopener noreferrer" class="acu-btn-block" style="margin:0; flex:1; justify-content:center; padding:12px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;"><i class="fa-solid fa-star"></i> 给项目点个星</a>
+                        </div>
 
                     </div>
                 </div>
@@ -2609,25 +2504,6 @@ ${allTableNames.map(tName => {
             saveConfig({ dbGlassStyle: val });
             // 主色调行仅苹果风格显示(联动显隐)
             dialog.find('#row-db-accent').css('display', val === 'apple' ? 'flex' : 'none');
-        });
-
-        dialog.find('#cfg-debug-mode').on('change', function() {
-            const on = $(this).is(':checked');
-            saveConfig({ debugMode: on });
-            if (on) debugHook(); else debugUnhook();
-        });
-        dialog.find('#btn-gen-debug-report').on('click', function() {
-            const wasOn = getConfig().debugMode;
-            if (!wasOn) debugHook(); // 开关未开:临时挂载采集一次
-            try {
-                const url = genDebugIssueUrl();
-                const $link = dialog.find('#debug-issue-link');
-                $link.attr('href', url).text(url.slice(0, 100) + '...');
-                dialog.find('#row-debug-result').css('display', 'flex');
-                if (window.open) { const w = window.open(url, '_blank'); if (w) w.focus(); }
-            } finally {
-                if (!wasOn) debugUnhook(); // 临时挂载用后必卸,异常也不残留包裹态
-            }
         });
 
         dialog.find('.acu-reverse-check').on('change', function() {
@@ -5352,7 +5228,6 @@ const checkRowChanged = (realIdx, row) => {
         if (isInitialized) return;
         addStyles();
         applyConfigStyles(getConfig());
-        if (getConfig().debugMode) debugHook();
 
         // 填表结束后前端"及时刷新"兜底：以"填表开始"信号驱动稳定轮询。
         // DB 在填表开始时调 _notifyTableFillStart；轮询每 ~2s 比较 exportTableAsJson 指纹，
