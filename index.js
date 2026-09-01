@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.4.8'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.4.9'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -13,6 +13,7 @@
     const STORAGE_KEY_REVERSE_TABLES = 'acu_reverse_tables';
     const STORAGE_KEY_HIDDEN_TABLES = 'acu_hidden_tables';
     const STORAGE_KEY_TABLE_STYLES = 'acu_table_styles';
+    const STORAGE_KEY_ST_EOL = 'acu_st_eol_notice'; // ST 停维公告只弹一次
 
     // HTML 转义工具(网络安全审查 deepseek-v4-pro):DB 表数据(表名/列名/单元格=角色卡/AI填表内容)
     // 模板插值原样拼 HTML 是存储型 XSS 面,统一转义 & < > " ' 五字符。
@@ -5297,6 +5298,31 @@ const checkRowChanged = (realIdx, row) => {
             }, POLL_INTERVAL_MS);
         };
 
+        // ST 停维公告：自 2026-09-07 起不再支持 SillyTavern，仅 TT 维护。
+        // 只在 ST 宿主弹一次（弹出即记标，关窗不重弹），TT 宿主与旧版浏览器异常全部静默跳过。
+        const showStEolNotice = () => {
+            try {
+                if (window.__TAURITAVERN__ || window.__TAURITAVERN_MAIN_READY__) return;
+                if (localStorage.getItem(STORAGE_KEY_ST_EOL)) return;
+                localStorage.setItem(STORAGE_KEY_ST_EOL, '1');
+            } catch (_) { return; }
+            const jq = getCore().$;
+            if (!jq) return;
+            jq(`
+                <div class="acu-eol-overlay" style="position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;background:rgba(0,0,0,0.55);z-index:2147483648;display:flex;justify-content:center;align-items:center;">
+                    <div style="background:var(--bg_content_2,#fff);color:var(--text1,#333);border-radius:12px;max-width:460px;width:90%;padding:22px 24px;box-shadow:0 12px 40px rgba(0,0,0,0.35);font-size:15px;line-height:1.8;">
+                        <div style="display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;margin-bottom:12px;"><i class="fa-solid fa-bullhorn"></i> 停止维护公告</div>
+                        <div>本可视化前端将于 <b>2026 年 9 月 7 日</b> 起<b>停止支持 SillyTavern（ST 酒馆）版本</b>，此后仅维护 <b>TauriTavern（TT 酒馆）版本</b>。</div>
+                        <div style="margin-top:8px;">到期后 ST 版不再更新，也不保证与新版本数据库的兼容性。如有需要，请提前迁移至 TT 酒馆。</div>
+                        <div style="margin-top:14px;text-align:right;"><button class="acu-eol-ok" style="cursor:pointer;border:none;border-radius:8px;padding:9px 22px;background:var(--ac-color,#4a7dff);color:#fff;font-size:14px;">我知道了</button></div>
+                    </div>
+                </div>
+            `).appendTo('body');
+            const close = () => jq('.acu-eol-overlay').remove();
+            jq('.acu-eol-ok').on('click', close);
+            jq('.acu-eol-overlay').on('click', (e) => { if (jq(e.target).hasClass('acu-eol-overlay')) close(); });
+        };
+
         const loop = () => {
              const { $ } = getCore();
              if (getCore().getDB()?.exportTableAsJson && $) {
@@ -5315,6 +5341,7 @@ const checkRowChanged = (realIdx, row) => {
                      }
                  }
                  isInitialized = true;
+                 setTimeout(showStEolNotice, 800);
                  // 修复串表：cachedTableData 是前端侧的深拷贝缓存，DB 内部 currentJsonTableData_ACU
                  // 在切换聊天时会被替换为新聊天的数据，但前端缓存不会自动失效；renderInterface(false)
                  // 走缓存路径，会把旧聊天的表显示到新聊天里。
