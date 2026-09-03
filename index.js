@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.4.10'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.5.1'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
