@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.5.2'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.5.3'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -35,6 +35,8 @@
     let bulkOpActive = false;
     // meta.persisted=false 提示的节流时间戳
     let lastUnpersistedToastTs = 0;
+    // MESSAGE_UPDATED → 被替换正文框轻量重检的防抖句柄
+    let repBoxDebounce = null;
     let isEditingOrder = false;
     let currentDiffMap = new Set();
     let observer = null;
@@ -2779,6 +2781,182 @@ ${allTableNames.map(tName => {
         }
     };
 
+    // 「被替换正文」面板数据源：数据库正文替换写回时把替换前原文存进
+    // chat[i].extra._acu_original_content（随聊天持久化，上游 9.2.4 与 rebuild 9.1.1 同式）。
+    // 以嵌入目标楼（DOM 最新 AI 楼）的 mesid 为准查该楼数据：ST 中 mesid=当前聊天数组下标，
+    // 与 getContext().chat 同源；楼不对/原文与现文相同/标记错帧则不显。
+    const getReplacedInfoForMesid = (mesid) => {
+        const w = window.parent || window;
+        const ST = w.SillyTavern || window.SillyTavern;
+        if (!ST || typeof ST.getContext !== 'function') return null;
+        let ctx;
+        try { ctx = ST.getContext(); } catch (_) { return null; }
+        const chat = ctx && Array.isArray(ctx.chat) ? ctx.chat : null;
+        if (!chat || !chat.length) return null;
+        const id = Number(mesid);
+        if (!Number.isInteger(id) || id < 0 || id >= chat.length) return null;
+        const m = chat[id];
+        if (!m || m.is_user === true || m.is_system === true) return null;
+        const extra = m.extra || {};
+        const orig = extra._acu_original_content;
+        if (typeof orig !== 'string' || !orig.trim()) return null;
+        if (m.mes === orig) return null;
+        const marker = extra._acu_last_optimized_message_id;
+        if (marker != null && m.message_id != null && marker !== m.message_id) return null;
+        return { original: orig, at: Number(extra._acu_last_optimized_at) || 0 };
+    };
+
+    const injectReplacedContentBox = () => {
+        const { $ } = getCore();
+        if (!$) return;
+        const SEL = '.acu-embedded-replaced-container';
+        const $target = getEmbeddedTargetBlock();
+        const info = ($target && $target.length)
+            ? getReplacedInfoForMesid($target.closest('.mes').attr('mesid'))
+            : null;
+        if (!info || !$target || !$target.length) {
+            $(SEL).remove();
+            return;
+        }
+        // 主题与变量从主 wrapper 现取（MESSAGE_UPDATED 轻量重渲染不经 renderInterface，无参可传）
+        const $wrapper = $('.acu-wrapper').first();
+        let themeClass = '';
+        let cssVars = '';
+        if ($wrapper.length) {
+            const tm = ($wrapper.attr('class') || '').match(/acu-theme-[a-zA-Z0-9_-]+/);
+            if (tm) themeClass = tm[0];
+            cssVars = $wrapper.attr('style') || '';
+        }
+
+        const $existing = $(SEL);
+        if ($existing.length && $existing.parent()[0] === $target[0]) {
+            // 原地更新：目标楼未换只需刷新文本与徽章
+            const $txt = $existing.find('.acu-replaced-text');
+            if ($txt.data('rep-src') !== info.original) {
+                $txt.text(info.original).data('rep-src', info.original);
+            }
+            $existing.find('.acu-replaced-time').text(info.at ? formatOptTime(info.at) : '');
+            alignWrapperToMessageColumn();
+            return;
+        }
+        $existing.remove();
+
+        const STORAGE_KEY_REP_COLLAPSE = 'acu_rep_collapse_state';
+        let isCollapsed = true; // 原文默认收起，不挤占屏幕
+        try {
+            const s = localStorage.getItem(STORAGE_KEY_REP_COLLAPSE);
+            if (s !== null) isCollapsed = s === 'true';
+        } catch (e) {}
+
+        const timeStr = info.at ? formatOptTime(info.at) : '';
+        const $container = $(`<div class="acu-embedded-replaced-container"></div>`);
+        $container.addClass(themeClass).attr('style', 'margin-bottom: 6px; width: 100%; clear: both; ' + cssVars);
+
+        const headerHtml = `
+            <div class="acu-rep-ctrl-bar" style="
+                display: flex; justify-content: space-between; align-items: center;
+                padding: 8px 12px;
+                background: var(--acu-bg-nav);
+                border: 1px solid var(--acu-border);
+                border-radius: ${isCollapsed ? '12px' : '12px 12px 0 0'};
+                cursor: pointer; user-select: none; transition: all 0.2s;
+                margin-bottom: ${isCollapsed ? '0' : '-1px'};
+                position: relative; z-index: 2;
+                backdrop-filter: blur(5px);
+                -webkit-tap-highlight-color: transparent;
+            ">
+                <span style="display:flex;align-items:center;gap:8px;font-weight:bold;color:var(--acu-title-color);font-size:13px;">
+                    <i class="fa-solid fa-rotate-left"></i> 被替换的正文<span class="acu-replaced-time" style="font-weight:normal;opacity:0.7;font-size:11px;">${timeStr}</span>
+                </span>
+                <span style="display:flex;align-items:center;gap:10px;">
+                    <button class="acu-header-btn acu-rep-copy" title="复制原文"><i class="fa-solid fa-copy"></i></button>
+                    <i class="fa-solid acu-rep-chevron ${isCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'}" style="opacity:0.6;"></i>
+                </span>
+            </div>
+        `;
+        const contentStyle = isCollapsed ? 'max-height: 0; opacity: 0; padding: 0;' : 'max-height: 260px; opacity: 1; padding: 10px 12px;';
+        const contentWrapperHtml = `
+            <div class="acu-rep-content-wrapper" style="
+                overflow: hidden; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                background: var(--acu-bg-nav);
+                border: 1px solid var(--acu-border); border-top: none;
+                border-radius: 0 0 12px 12px; backdrop-filter: blur(5px);
+                ${contentStyle}
+            ">
+                <div class="acu-replaced-text" style="
+                    max-height: 236px; overflow-y: auto; white-space: pre-wrap;
+                    word-break: break-word; font-size: 13px; line-height: 1.6;
+                    color: var(--acu-text-main, var(--textColor, #333));
+                "></div>
+            </div>
+        `;
+        $container.append(headerHtml);
+        $container.append(contentWrapperHtml);
+        $container.find('.acu-replaced-text').text(info.original).data('rep-src', info.original);
+
+        const $header = $container.find('.acu-rep-ctrl-bar');
+        const $wrapperEl = $container.find('.acu-rep-content-wrapper');
+        $header.on('click', function (e) {
+            if ($(e.target).closest('.acu-rep-copy').length) return;
+            e.stopPropagation();
+            let nowCollapsed = true;
+            try {
+                const cur = localStorage.getItem(STORAGE_KEY_REP_COLLAPSE);
+                nowCollapsed = cur === null ? true : cur === 'true';
+            } catch (_) {}
+            if (nowCollapsed) {
+                $wrapperEl.css({ 'max-height': '260px', 'opacity': '1', 'padding': '10px 12px' });
+                $header.css({ 'border-radius': '12px 12px 0 0', 'margin-bottom': '-1px' });
+                $header.find('.acu-rep-chevron').removeClass('fa-chevron-down').addClass('fa-chevron-up');
+                try { localStorage.setItem(STORAGE_KEY_REP_COLLAPSE, 'false'); } catch (_) {}
+            } else {
+                $wrapperEl.css({ 'max-height': '0', 'opacity': '0', 'padding': '0' });
+                $header.css({ 'border-radius': '12px', 'margin-bottom': '0' });
+                $header.find('.acu-rep-chevron').removeClass('fa-chevron-up').addClass('fa-chevron-down');
+                try { localStorage.setItem(STORAGE_KEY_REP_COLLAPSE, 'true'); } catch (_) {}
+            }
+        });
+        $container.find('.acu-rep-copy').on('click', function (e) {
+            e.stopPropagation();
+            // 从实时 DOM 读（原地更新路径不重绑本 handler，闭包 info 会过期）
+            const text = $container.find('.acu-replaced-text').text();
+            const done = () => { if (window.toastr) toastr.success('已复制替换前原文。', { timeOut: 1500 }); };
+            const fallback = () => {
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed'; ta.style.opacity = '0';
+                    document.body.appendChild(ta); ta.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(ta);
+                    done();
+                } catch (_) {
+                    if (window.toastr) toastr.error('复制失败，请手动选择文本复制。', { timeOut: 2000 });
+                }
+            };
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(done).catch(fallback);
+                } else fallback();
+            } catch (_) { fallback(); }
+        });
+
+        //  prepend 到楼层正文之前：视觉上紧贴本楼新正文上方，语义=这楼的旧版本
+        $target.prepend($container);
+        alignWrapperToMessageColumn();
+    };
+
+    // 替换时间徽章：HH:MM（当天）/ M月D日 HH:MM（更早）
+    const formatOptTime = (ts) => {
+        try {
+            const d = new Date(ts);
+            const now = new Date();
+            const hm = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+            if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()) return ' · ' + hm;
+            return ' · ' + (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + hm;
+        } catch (_) { return ''; }
+    };
+
     const renderInterface = (forceRefresh = false) => {
         const { $ } = getCore();
         if (!$) return;
@@ -3021,6 +3199,9 @@ ${allTableNames.map(tName => {
             } else {
                 $('.acu-embedded-options-container').remove();
             }
+            // 被替换正文框与表格数据无关，随主刷新维护一次；替换成功但无填表时靠 MESSAGE_UPDATED 订阅兜底
+            try { injectReplacedContentBox(); }
+            catch (e) { console.error('[ACU] 被替换正文容器注入失败(不影响面板):', e); }
 
             bindEvents(tables);
             if (globalScrollTop > 0) {
@@ -3492,6 +3673,8 @@ ${allTableNames.map(tName => {
         const plans = [
             planPanelAlignment($('.acu-embedded-dashboard-container'), column, inset),
             planPanelAlignment($('.acu-embedded-options-container'), column, inset),
+            // 被替换正文框：与仪表盘/选项同款附属块，同列同 inset（漏了它会 width:100% 右溢）
+            planPanelAlignment($('.acu-embedded-replaced-container'), column, inset),
             // 滚动模式主面板（acu-tt-scroll）：挂末楼 mes_block 内，与嵌入式仪表盘/选项同挂点，
             // 用同一测量对齐机制（setProperty important），inset 减 6px = 比仪表盘略长且可感知。
             // 固定模式 wrapper 挂 #form_sheld 前不参与正文列对齐（保持全宽），本选择器不命中。
@@ -5373,12 +5556,32 @@ const checkRowChanged = (realIdx, row) => {
                          }
                      } catch (e) { console.warn('[ACU-UI] 订阅 CHAT_CHANGED 失败，串表保护未启用:', e); }
                  };
+                 // 正文替换写回会 emit MESSAGE_UPDATED 但不一定触发表格回调；
+                 // 订阅它做防抖轻量重检，保证「被替换正文」框在纯替换(无填表)场景也能即时出现。
+                 const trySubscribeMessageUpdated = () => {
+                     try {
+                         const w = window.parent || window;
+                         const ST = w.SillyTavern || window.SillyTavern;
+                         const evSrc = ST && ST.eventSource;
+                         const evTypes = ST && ST.eventTypes;
+                         if (evSrc && typeof evSrc.on === 'function' && evTypes && evTypes.MESSAGE_UPDATED) {
+                             evSrc.on(evTypes.MESSAGE_UPDATED, () => {
+                                 if (repBoxDebounce) clearTimeout(repBoxDebounce);
+                                 repBoxDebounce = setTimeout(() => {
+                                     repBoxDebounce = null;
+                                     try { injectReplacedContentBox(); } catch (_) {}
+                                 }, 120);
+                             });
+                         }
+                     } catch (e) { console.warn('[ACU-UI] 订阅 MESSAGE_UPDATED 失败，被替换正文即时刷新未启用:', e); }
+                 };
                  // TT 增量：若存在 __TAURITAVERN__.ready，待宿主就绪后再订阅，避免 importWithRetry 竞态漏接；ST 无该符号时短路走原路径
+                 const subscribeHostEvents = () => { trySubscribeChatChanged(); trySubscribeMessageUpdated(); };
                  try {
                      const ttReady = (typeof window !== 'undefined' && (window.__TAURITAVERN__?.ready || window.__TAURITAVERN_MAIN_READY__));
-                     if (ttReady && typeof ttReady.then === 'function') ttReady.then(trySubscribeChatChanged).catch(trySubscribeChatChanged);
-                     else trySubscribeChatChanged();
-                 } catch (_) { trySubscribeChatChanged(); }
+                     if (ttReady && typeof ttReady.then === 'function') ttReady.then(subscribeHostEvents).catch(subscribeHostEvents);
+                     else subscribeHostEvents();
+                 } catch (_) { subscribeHostEvents(); }
              } else setTimeout(loop, 1000);
         };
         // TT 增量：ready 就绪后立即重试，缩短 importWithRetry 空转；ST 无该符号时无影响
