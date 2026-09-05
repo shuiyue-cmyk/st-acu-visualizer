@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.5.4'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.5.5'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -37,8 +37,6 @@
     let lastUnpersistedToastTs = 0;
     // MESSAGE_UPDATED → 被替换正文框轻量重检的防抖句柄
     let repBoxDebounce = null;
-    // TEMP-DIAG：替代框自检，一次性定位用，定位后删除
-    let lastRepDiagKey = '';
     let isEditingOrder = false;
     let currentDiffMap = new Set();
     let observer = null;
@@ -2816,40 +2814,6 @@ ${allTableNames.map(tName => {
         const info = ($target && $target.length)
             ? getReplacedInfoForMesid($target.closest('.mes').attr('mesid'))
             : null;
-        // TEMP-DIAG：目标楼在但无原文数据时，报一行原因（定位后删除）
-        if ($target && $target.length && !info) {
-            try {
-                const w = window.parent || window;
-                const ST = w.SillyTavern || window.SillyTavern;
-                let reason = 'noST';
-                if (ST && typeof ST.getContext === 'function') {
-                    const cx = ST.getContext();
-                    const ch = cx && Array.isArray(cx.chat) ? cx.chat : null;
-                    if (!ch) reason = 'noChat';
-                    else {
-                        const mid = $target.closest('.mes').attr('mesid');
-                        const m = ch[Number(mid)];
-                        if (!m) reason = 'mesid越界(' + mid + '/' + ch.length + ')';
-                        else if (m.is_user === true) reason = '目标是用户楼';
-                        else {
-                            const o = (m.extra || {})._acu_original_content;
-                            if (typeof o !== 'string' || !o.trim()) reason = '无原文extra';
-                            else if (m.mes === o) reason = '原文与现文相同';
-                            else {
-                                const mk = (m.extra || {})._acu_last_optimized_message_id;
-                                reason = (mk != null && m.message_id != null && mk !== m.message_id)
-                                    ? '标记错帧(' + mk + '!=' + m.message_id + ')' : '未知';
-                            }
-                        }
-                    }
-                }
-                const key = reason;
-                if (key !== lastRepDiagKey && window.toastr) {
-                    lastRepDiagKey = key;
-                    toastr.info('替代框自检：' + reason, { timeOut: 6000 });
-                }
-            } catch (_) {}
-        }
         if (!info || !$target || !$target.length) {
             $(SEL).remove();
             return;
