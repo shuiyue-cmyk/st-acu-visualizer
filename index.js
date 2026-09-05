@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.5.9'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.5.10'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -2781,112 +2781,6 @@ ${allTableNames.map(tName => {
         }
     };
 
-    // ST 正则(AI_OUTPUT)前端小跑器：正则引擎是 ESM 且无全局挂载，普通扩展脚本调不到
-    // getRegexedString，只能按 engine.js 显示路径逐字移植。数据源全走 getContext 暴露面。
-    // 缺口：预设域脚本需 getPresetManager（未暴露），跑不到，如实缺失。
-    const acuRegexFromString = (input) => {
-        try {
-            const m = String(input).match(/(\/?)(.+)\1([a-z]*)/i);
-            if (m[3] && !/^(?!.*?(.).*?\1)[gmixXsuUAJ]+$/.test(m[3])) return RegExp(input);
-            return new RegExp(m[2], m[3]);
-        } catch (_) { return null; }
-    };
-    const acuSanitizeRegexMacro = (x) => (x && typeof x === 'string')
-        ? x.replaceAll(/[\n\r\t\v\f\0.^$*+?{}[\]\\/|()]/gs, (s) => {
-            switch (s) {
-                case '\n': return '\\n'; case '\r': return '\\r'; case '\t': return '\\t';
-                case '\v': return '\\v'; case '\f': return '\\f'; case '\0': return '\\0';
-                default: return '\\' + s;
-            }
-        }) : x;
-    const getAcuRegexedOriginal = (rawString, mesid) => {
-        try {
-            if (typeof rawString !== 'string' || !rawString) return rawString;
-            const w = window.parent || window;
-            const ST = w.SillyTavern || window.SillyTavern;
-            if (!ST || typeof ST.getContext !== 'function') return rawString;
-            const ctx = ST.getContext();
-            const ext = ctx && ctx.extensionSettings;
-            if (!ctx || !ext) return rawString;
-            if (Array.isArray(ext.disabledExtensions) && ext.disabledExtensions.includes('regex')) return rawString;
-            const chat = Array.isArray(ctx.chat) ? ctx.chat : [];
-            const id = Number(mesid);
-            // depth 算法同气泡：非系统楼中的倒数位置，单遍 O(n)
-            let repPos = -1, repCount = 0;
-            for (let k = 0; k < chat.length; k++) {
-                if (chat[k] && !chat[k].is_system) {
-                    if (k === id) repPos = repCount;
-                    repCount++;
-                }
-            }
-            const depth = (id >= 0 && repPos !== -1) ? (repCount - repPos - 1) : undefined;
-            const chName = (id >= 0 && id < chat.length && chat[id]) ? chat[id].name : undefined;
-            let scripts = Array.isArray(ext.regex) ? [...ext.regex] : [];
-            try {
-                const chid = ctx.characterId;
-                const avatar = ctx.characters && chid != null ? ctx.characters[chid]?.avatar : undefined;
-                if (Array.isArray(ext.character_allowed_regex) && avatar != null && ext.character_allowed_regex.includes(avatar)) {
-                    const scoped = ctx.characters[chid]?.data?.extensions?.regex_scripts;
-                    if (Array.isArray(scoped)) scripts = scripts.concat(scoped);
-                }
-            } catch (_) {}
-            const subExt = (s, esc) => {
-                try {
-                    if (typeof ctx.substituteParamsExtended !== 'function') return s;
-                    return esc ? ctx.substituteParamsExtended(s, {}, acuSanitizeRegexMacro) : ctx.substituteParamsExtended(s);
-                } catch (_) { return s; }
-            };
-            const subPlain = (s, name2) => {
-                try {
-                    if (typeof ctx.substituteParams !== 'function') return s;
-                    return name2 != null ? ctx.substituteParams(s, { name2Override: name2 }) : ctx.substituteParams(s);
-                } catch (_) { return s; }
-            };
-            const isMarkdown = true, isPrompt = false;
-            let out = rawString;
-            for (const script of scripts) {
-                if (!script || script.disabled || !script.findRegex) continue;
-                if (!((script.markdownOnly && isMarkdown) ||
-                    (script.promptOnly && isPrompt) ||
-                    (!script.markdownOnly && !script.promptOnly && !isMarkdown && !isPrompt))) continue;
-                if (typeof depth === 'number') {
-                    if (!isNaN(script.minDepth) && script.minDepth !== null && script.minDepth >= -1 && depth < script.minDepth) continue;
-                    if (!isNaN(script.maxDepth) && script.maxDepth !== null && script.maxDepth >= 0 && depth > script.maxDepth) continue;
-                }
-                const pl = script.placement;
-                if (!(Array.isArray(pl) ? pl.includes(2) : pl === 2)) continue;
-                let findSrc = script.findRegex;
-                switch (Number(script.substituteRegex)) {
-                    case 1: findSrc = subExt(findSrc, false); break;
-                    case 2: findSrc = subExt(findSrc, true); break;
-                    default: break;
-                }
-                const findRe = acuRegexFromString(findSrc);
-                if (!findRe) continue;
-                out = out.replace(findRe, function (match) {
-                    const args = [...arguments];
-                    let m = match;
-                    const replaceString = String(script.replaceString || '').replace(/{{match}}/gi, '$0');
-                    const replaced = replaceString.replaceAll(/\$(\d+)|\$<([^>]+)>/g, (_, num, groupName) => {
-                        if (num) m = args[Number(num)];
-                        else if (groupName) {
-                            const groups = args[args.length - 1];
-                            m = groups && typeof groups === 'object' && groups[groupName];
-                        }
-                        if (!m) return '';
-                        let filtered = String(m);
-                        (script.trimStrings || []).forEach((trimString) => {
-                            filtered = filtered.replaceAll(subPlain(trimString, chName), '');
-                        });
-                        return filtered;
-                    });
-                    return subPlain(replaced);
-                });
-            }
-            return out;
-        } catch (_) { return rawString; }
-    };
-
     // 「被替换正文」面板数据源：数据库正文替换写回时把替换前原文存进
     // chat[i].extra._acu_original_content（随聊天持久化，上游 9.2.4 与 rebuild 9.1.1 同式）。
     // 以嵌入目标楼（DOM 最新 AI 楼）的 mesid 为准查该楼数据：ST 中 mesid=当前聊天数组下标，
@@ -2917,10 +2811,9 @@ ${allTableNames.map(tName => {
         if (!$) return;
         const SEL = '.acu-embedded-replaced-container';
         const $target = getEmbeddedTargetBlock();
-        const repMesid = ($target && $target.length) ? $target.closest('.mes').attr('mesid') : null;
-        const info = repMesid != null ? getReplacedInfoForMesid(repMesid) : null;
-        // 与楼内气泡所见对齐：原文先过 AI_OUTPUT 正则再显示；复制读 DOM 即所见所得
-        const repDisplay = info ? getAcuRegexedOriginal(info.original, repMesid) : '';
+        const info = ($target && $target.length)
+            ? getReplacedInfoForMesid($target.closest('.mes').attr('mesid'))
+            : null;
         if (!info || !$target || !$target.length) {
             $(SEL).remove();
             return;
@@ -2939,8 +2832,8 @@ ${allTableNames.map(tName => {
         if ($existing.length && $existing.parent()[0] === $target[0]) {
             // 原地更新：目标楼未换只需刷新文本与徽章
             const $txt = $existing.find('.acu-replaced-text');
-            if ($txt.data('rep-src') !== repDisplay) {
-                $txt.text(repDisplay).data('rep-src', repDisplay);
+            if ($txt.data('rep-src') !== info.original) {
+                $txt.text(info.original).data('rep-src', info.original);
             }
             $existing.find('.acu-replaced-time').text(info.at ? formatOptTime(info.at) : '');
             alignWrapperToMessageColumn();
@@ -2999,7 +2892,7 @@ ${allTableNames.map(tName => {
         `;
         $container.append(headerHtml);
         $container.append(contentWrapperHtml);
-        $container.find('.acu-replaced-text').text(repDisplay).data('rep-src', repDisplay);
+        $container.find('.acu-replaced-text').text(info.original).data('rep-src', info.original);
 
         const $header = $container.find('.acu-rep-ctrl-bar');
         const $wrapperEl = $container.find('.acu-rep-content-wrapper');
