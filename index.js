@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.5.8'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.5.9'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -5636,12 +5636,24 @@ const checkRowChanged = (realIdx, row) => {
                  // 在切换聊天时会被替换为新聊天的数据，但前端缓存不会自动失效；renderInterface(false)
                  // 走缓存路径，会把旧聊天的表显示到新聊天里。
                  // 订阅 ST 的 CHAT_CHANGED 事件，命中时清缓存 + 丢快照 + 强制刷新，杜绝跨聊天串表。
-                 const trySubscribeChatChanged = () => {
+                 // 宿主事件总线：SillyTavern 全局只有 {libs,getContext}，eventSource/eventTypes
+                 // 必须走 getContext() 快照拿（直读 ST.eventSource 恒为 undefined，订阅静默装不上）。
+                 const getHostEventBus = () => {
                      try {
                          const w = window.parent || window;
                          const ST = w.SillyTavern || window.SillyTavern;
-                         const evSrc = ST && ST.eventSource;
-                         const evTypes = ST && ST.eventTypes;
+                         if (!ST) return {};
+                         let ctx = null;
+                         try { ctx = typeof ST.getContext === 'function' ? ST.getContext() : null; } catch (_) {}
+                         return {
+                             evSrc: (ctx && ctx.eventSource) || ST.eventSource,
+                             evTypes: (ctx && ctx.eventTypes) || ST.eventTypes,
+                         };
+                     } catch (_) { return {}; }
+                 };
+                 const trySubscribeChatChanged = () => {
+                     try {
+                         const { evSrc, evTypes } = getHostEventBus();
                          if (evSrc && typeof evSrc.on === 'function' && evTypes && evTypes.CHAT_CHANGED) {
                              evSrc.on(evTypes.CHAT_CHANGED, () => {
                                  stopFillPoll();
@@ -5667,10 +5679,7 @@ const checkRowChanged = (realIdx, row) => {
                  // 订阅它做防抖轻量重检，保证「被替换正文」框在纯替换(无填表)场景也能即时出现。
                  const trySubscribeMessageUpdated = () => {
                      try {
-                         const w = window.parent || window;
-                         const ST = w.SillyTavern || window.SillyTavern;
-                         const evSrc = ST && ST.eventSource;
-                         const evTypes = ST && ST.eventTypes;
+                         const { evSrc, evTypes } = getHostEventBus();
                          if (evSrc && typeof evSrc.on === 'function' && evTypes && evTypes.MESSAGE_UPDATED) {
                              evSrc.on(evTypes.MESSAGE_UPDATED, () => {
                                  if (repBoxDebounce) clearTimeout(repBoxDebounce);
