@@ -38,6 +38,7 @@ SillyTavern 的「SP·数据库」可视化前端扩展。在聊天区渲染数�
 
 | 前端版本 | 适配数据库 | 说明 |
 |---|---|---|
+| V17.5.4 | 9.2.4 + rebuild 9.1.1（双库） | 一次性自检 toast：被替换正文框该显未显时报一行原因（定位后删除，不影响功能） |
 | V17.5.3 | 9.2.4 + rebuild 9.1.1（双库） | 新增「被替换的正文」内嵌框：正文替换成功后在最新 AI 楼顶部显示可收起的替换前原文（与行动选项同款嵌入/对齐），一键复制；数据读 `chat[mesid].extra._acu_original_content`（双库同式，随聊天持久化），MESSAGE_UPDATED 防抖兜底刷新 |
 | V17.5.2 | 9.2.4 + rebuild 9.1.1（双库） | 首个双库兼容戳：上游 AlbusKen/shujuku 9.2.4 与自家 TT 库 shujuku-rebuild 9.1.1（792a3c0）公共契约双探针全绿——13 调用点双在位签名一致、精确写布尔返回、persisted 同式归一、export 活引用、豁免集同集，前端无逻辑变更 |
 | V17.5.1 | 9.2.4（插件版） | 上游 9.1→9.2.4（33 笔：API 预设协议四选一 PR#10/API 后处理 PR#11/模板冲突 fail-closed/SQL isolatedRuntime 可选分支重构/续写与填表修复；CRUD API 层仅空白变更、SQL 默认路径语义不变、API_DOCUMENTATION.md 整文件删除纯文档），公共契约探针全兼容，前端无逻辑变更 |
