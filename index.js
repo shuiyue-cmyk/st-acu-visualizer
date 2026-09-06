@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.5.10'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.6.1'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -155,7 +155,10 @@
         dbAppleGlass: false,
         dbAccent: 'blue',
         dbGlassStyle: 'off',
-        ttPanelMode: 'fixed'
+        ttPanelMode: 'fixed',
+        repBoxEnabled: true,
+        repBoxScope: 'latest',
+        repBoxPosition: 'top'
     };
 
     const THEMES = [
@@ -2300,7 +2303,31 @@
                                     </div>
                                 </div>
                             </div>
-</div></div><div class="acu-section-header" data-target="sec-dashboard"><div class="acu-section-title"><i class="fa-solid fa-tachometer-alt"></i> 仪表盘</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-dashboard"><div class="acu-settings-group">
+</div></div><div class="acu-section-header" data-target="sec-repbox"><div class="acu-section-title"><i class="fa-solid fa-rotate-left"></i> 正文替换</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-repbox"><div class="acu-settings-group"><div class="acu-control-row">
+                                <div class="acu-label-col"><span class="acu-label-main">被替换正文显示</span></div>
+                                <div class="acu-input-col">
+                                    <label class="acu-switch">
+                                        <input type="checkbox" id="cfg-rep-enabled" ${config.repBoxEnabled !== false ? 'checked' : ''}>
+                                        <span class="acu-slider-switch"></span>
+                                    </label>
+                                </div>
+                            </div><div class="acu-control-row">
+                                <div class="acu-label-col"><span class="acu-label-main">显示范围</span></div>
+                                <div class="acu-input-col">
+                                    <select id="cfg-rep-scope" class="acu-nice-select">
+                                        <option value="latest" ${config.repBoxScope !== 'all' ? 'selected' : ''}>仅最新一层</option>
+                                        <option value="all" ${config.repBoxScope === 'all' ? 'selected' : ''}>所有有替换的楼层</option>
+                                    </select>
+                                </div>
+                            </div><div class="acu-control-row">
+                                <div class="acu-label-col"><span class="acu-label-main">显示位置</span></div>
+                                <div class="acu-input-col">
+                                    <select id="cfg-rep-position" class="acu-nice-select">
+                                        <option value="top" ${config.repBoxPosition !== 'bottom' ? 'selected' : ''}>楼层顶部</option>
+                                        <option value="bottom" ${config.repBoxPosition === 'bottom' ? 'selected' : ''}>楼层底部（选项上方）</option>
+                                    </select>
+                                </div>
+                            </div></div></div><div class="acu-section-header" data-target="sec-dashboard"><div class="acu-section-title"><i class="fa-solid fa-tachometer-alt"></i> 仪表盘</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-dashboard"><div class="acu-settings-group">
 <div class="acu-control-row" >
                                 <div class="acu-label-col"><span class="acu-label-main">仪表盘开关</span></div>
                                 <div class="acu-input-col">
@@ -2448,6 +2475,9 @@ ${allTableNames.map(tName => {
             renderInterface(false);
         });
         dialog.find('#cfg-auto-send').on('change', function() { saveConfig({ clickOptionToAutoSend: $(this).is(':checked') }); });
+        dialog.find('#cfg-rep-enabled').on('change', function() { saveConfig({ repBoxEnabled: $(this).is(':checked') }); renderInterface(false); });
+        dialog.find('#cfg-rep-scope').on('change', function() { saveConfig({ repBoxScope: $(this).val() }); renderInterface(false); });
+        dialog.find('#cfg-rep-position').on('change', function() { saveConfig({ repBoxPosition: $(this).val() }); renderInterface(false); });
         dialog.find('#cfg-new').on('change', function() { 
             const checked = $(this).is(':checked');
             saveConfig({ highlightNew: checked }); 
@@ -2785,14 +2815,8 @@ ${allTableNames.map(tName => {
     // chat[i].extra._acu_original_content（随聊天持久化，上游 9.2.4 与 rebuild 9.1.1 同式）。
     // 以嵌入目标楼（DOM 最新 AI 楼）的 mesid 为准查该楼数据：ST 中 mesid=当前聊天数组下标，
     // 与 getContext().chat 同源；楼不对/原文与现文相同/标记错帧则不显。
-    const getReplacedInfoForMesid = (mesid) => {
-        const w = window.parent || window;
-        const ST = w.SillyTavern || window.SillyTavern;
-        if (!ST || typeof ST.getContext !== 'function') return null;
-        let ctx;
-        try { ctx = ST.getContext(); } catch (_) { return null; }
-        const chat = ctx && Array.isArray(ctx.chat) ? ctx.chat : null;
-        if (!chat || !chat.length) return null;
+    const getReplacedInfoForMesid = (mesid, chat) => {
+        if (!Array.isArray(chat) || !chat.length) return null;
         const id = Number(mesid);
         if (!Number.isInteger(id) || id < 0 || id >= chat.length) return null;
         const m = chat[id];
@@ -2806,18 +2830,54 @@ ${allTableNames.map(tName => {
         return { original: orig, at: Number(extra._acu_last_optimized_at) || 0 };
     };
 
+    // 与 getEmbeddedTargetBlock 同过滤的可见 AI 楼枚举（该函数保持原样给仪表盘/选项用）
+    const collectAiMessageFloors = () => {
+        const { $ } = getCore();
+        const out = [];
+        const $all = $('#chat .mes');
+        if (!$all.length) return out;
+        $all.each(function () {
+            const el = this;
+            if (el.getAttribute('is_user') === 'true' || el.getAttribute('is_system') === 'true') return;
+            if (el.classList.contains('sys_mes')) return;
+            const $name = el.querySelector('.name_text');
+            if ($name && $name.textContent.trim() === 'System') return;
+            if (el.offsetParent === null && el.getClientRects().length === 0) return;
+            const $el = $(el);
+            const $block = $el.find('.mes_block');
+            out.push({ $block: $block.length ? $block : $el, mesid: $el.attr('mesid') });
+        });
+        return out;
+    };
+
+    // 盒子落位：top=块顶 prepend；bottom=块底选项框之前（无选项框则 append）
+    const placeRepBox = ($block, $box, position) => {
+        if (position === 'bottom') {
+            const $opts = $block.find('.acu-embedded-options-container');
+            if ($opts.length) { $opts.before($box); return; }
+            $block.append($box);
+            return;
+        }
+        $block.prepend($box);
+    };
+
     const injectReplacedContentBox = () => {
         const { $ } = getCore();
         if (!$) return;
         const SEL = '.acu-embedded-replaced-container';
-        const $target = getEmbeddedTargetBlock();
-        const info = ($target && $target.length)
-            ? getReplacedInfoForMesid($target.closest('.mes').attr('mesid'))
-            : null;
-        if (!info || !$target || !$target.length) {
-            $(SEL).remove();
-            return;
-        }
+        const config = getConfig();
+        if (config.repBoxEnabled === false) { $(SEL).remove(); return; }
+        const scope = config.repBoxScope === 'all' ? 'all' : 'latest';
+        const position = config.repBoxPosition === 'bottom' ? 'bottom' : 'top';
+        let chat = null;
+        try {
+            const w = window.parent || window;
+            const ST = w.SillyTavern || window.SillyTavern;
+            const ctx = ST && typeof ST.getContext === 'function' ? ST.getContext() : null;
+            chat = ctx && Array.isArray(ctx.chat) ? ctx.chat : null;
+        } catch (_) {}
+        const floors = collectAiMessageFloors();
+        const wanted = scope === 'all' ? floors : floors.slice(-1);
         // 主题与变量从主 wrapper 现取（MESSAGE_UPDATED 轻量重渲染不经 renderInterface，无参可传）
         const $wrapper = $('.acu-wrapper').first();
         let themeClass = '';
@@ -2827,19 +2887,33 @@ ${allTableNames.map(tName => {
             if (tm) themeClass = tm[0];
             cssVars = $wrapper.attr('style') || '';
         }
+        const liveParents = new Set();
+        wanted.forEach((f) => {
+            const info = chat ? getReplacedInfoForMesid(f.mesid, chat) : null;
+            if (!info) { f.$block.find(SEL).remove(); return; }
+            liveParents.add(f.$block[0]);
+            upsertRepBox(f.$block, info, position, themeClass, cssVars);
+        });
+        $(SEL).each(function () {
+            if (!liveParents.has($(this).parent()[0])) $(this).remove();
+        });
+        alignWrapperToMessageColumn();
+    };
 
-        const $existing = $(SEL);
-        if ($existing.length && $existing.parent()[0] === $target[0]) {
-            // 原地更新：目标楼未换只需刷新文本与徽章
+    const upsertRepBox = ($target, info, position, themeClass, cssVars) => {
+        const { $ } = getCore();
+        const SEL = '.acu-embedded-replaced-container';
+        const $existing = $target.find(SEL);
+        if ($existing.length) {
+            // 原地更新：目标楼未换只需刷新文本与徽章，并按当前位置设置落位
             const $txt = $existing.find('.acu-replaced-text');
             if ($txt.data('rep-src') !== info.original) {
                 $txt.text(info.original).data('rep-src', info.original);
             }
             $existing.find('.acu-replaced-time').text(info.at ? formatOptTime(info.at) : '');
-            alignWrapperToMessageColumn();
+            placeRepBox($target, $existing, position);
             return;
         }
-        $existing.remove();
 
         const STORAGE_KEY_REP_COLLAPSE = 'acu_rep_collapse_state';
         let isCollapsed = true; // 原文默认收起，不挤占屏幕
@@ -2850,7 +2924,7 @@ ${allTableNames.map(tName => {
 
         const timeStr = info.at ? formatOptTime(info.at) : '';
         const $container = $(`<div class="acu-embedded-replaced-container"></div>`);
-        $container.addClass(themeClass).attr('style', 'margin-bottom: 6px; width: 100%; clear: both; ' + cssVars);
+        $container.addClass(themeClass).attr('style', (position === 'bottom' ? 'margin-top: 6px; ' : 'margin-bottom: 6px; ') + 'width: 100%; clear: both; ' + cssVars);
 
         const headerHtml = `
             <div class="acu-rep-ctrl-bar" style="
@@ -2941,9 +3015,8 @@ ${allTableNames.map(tName => {
             } catch (_) { fallback(); }
         });
 
-        //  prepend 到楼层正文之前：视觉上紧贴本楼新正文上方，语义=这楼的旧版本
-        $target.prepend($container);
-        alignWrapperToMessageColumn();
+        // 落位由 position 决定：top=块顶（紧贴本楼新正文上方，旧版本语义）；bottom=块底选项框之前
+        placeRepBox($target, $container, position);
     };
 
     // 替换时间徽章：HH:MM（当天）/ M月D日 HH:MM（更早）
