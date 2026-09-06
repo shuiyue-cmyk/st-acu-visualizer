@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.6.1'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.6.2'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -2312,7 +2312,7 @@
                                     </label>
                                 </div>
                             </div><div class="acu-control-row">
-                                <div class="acu-label-col"><span class="acu-label-main">显示范围</span></div>
+                                <div class="acu-label-col"><span class="acu-label-main">显示范围</span><span class="acu-label-sub" style="font-weight:normal">TT虚拟化开启时强制仅最新一层</span></div>
                                 <div class="acu-input-col">
                                     <select id="cfg-rep-scope" class="acu-nice-select">
                                         <option value="latest" ${config.repBoxScope !== 'all' ? 'selected' : ''}>仅最新一层</option>
@@ -2869,6 +2869,10 @@ ${allTableNames.map(tName => {
         if (config.repBoxEnabled === false) { $(SEL).remove(); return; }
         const scope = config.repBoxScope === 'all' ? 'all' : 'latest';
         const position = config.repBoxPosition === 'bottom' ? 'bottom' : 'top';
+        // TT 有界虚拟化下托管消息 strict：多楼层注入会 fault（message runtime source ownership
+        // diverged → 虚拟化停止），强制退回仅最新一层（与仪表盘/选项单楼层同风险面）。
+        // 非虚拟化/ST 下全楼层安全。
+        const effectiveScope = (scope === 'all' && !detectTTBounded()) ? 'all' : 'latest';
         let chat = null;
         try {
             const w = window.parent || window;
@@ -2877,7 +2881,7 @@ ${allTableNames.map(tName => {
             chat = ctx && Array.isArray(ctx.chat) ? ctx.chat : null;
         } catch (_) {}
         const floors = collectAiMessageFloors();
-        const wanted = scope === 'all' ? floors : floors.slice(-1);
+        const wanted = effectiveScope === 'all' ? floors : floors.slice(-1);
         // 主题与变量从主 wrapper 现取（MESSAGE_UPDATED 轻量重渲染不经 renderInterface，无参可传）
         const $wrapper = $('.acu-wrapper').first();
         let themeClass = '';

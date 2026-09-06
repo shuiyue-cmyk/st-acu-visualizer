@@ -38,6 +38,7 @@ SillyTavern 的「SP·数据库」可视化前端扩展。在聊天区渲染数�
 
 | 前端版本 | 适配数据库 | 说明 |
 |---|---|---|
+| V17.6.2 | 9.2.4 + rebuild 9.1.1（双库） | 修 TT 虚拟化 fault：有界虚拟化下被替换正文框强制仅最新一层（多楼层注入触发 message runtime source ownership diverged 致虚拟化停止）；非虚拟化/ST 仍全楼层 |
 | V17.6.1 | 9.2.4 + rebuild 9.1.1（双库） | 被替换正文框升级：所有有替换的楼层均可保留显示；设置新增「正文替换」区（显示开关/仅最新一层或全部楼层/楼层顶部或底部选项上方）；patch 到顶进 minor |
 | V17.5.10 | 9.2.4 + rebuild 9.1.1（双库） | 彻底回滚被替换正文框的正则套用（效果不好且无更好方案）：恢复显示未经正则的原文，AI_OUTPUT 小跑器整块删除零残留 |
 | V17.5.9 | 9.2.4 + rebuild 9.1.1（双库） | 修事件订阅静默失效：SillyTavern 全局仅含 {libs,getContext}，事件总线须走 getContext() 快照拿；此前直读 ST.eventSource 恒 undefined，CHAT_CHANGED/MESSAGE_UPDATED 从未装上（被替换正文框只靠表格回调顺带刷新，纯替换场景无刷新） |
