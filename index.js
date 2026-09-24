@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.6.4'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.6.5'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -1791,14 +1791,22 @@
             try {
                 if (api && updateContext) {
                     let apiResult;
+                    let preciseApiCalled = false;
                     if (updateContext.type === 'cell_edit' && api.updateCell) {
+                        preciseApiCalled = true;
                         apiResult = await api.updateCell(updateContext.tableName, updateContext.rowIndex + 1, updateContext.colIndex, updateContext.newValue);
                     } else if (updateContext.type === 'row_edit' && api.updateRow) {
+                        preciseApiCalled = true;
                         apiResult = await api.updateRow(updateContext.tableName, updateContext.rowIndex + 1, updateContext.updateObj);
                     } else if (updateContext.type === 'row_delete' && api.deleteRow) {
+                        preciseApiCalled = true;
                         apiResult = await api.deleteRow(updateContext.tableName, updateContext.rowIndex + 1);
                     }
-                    if (apiResult !== false) {
+                    // 未调用到与当前操作对应的精确 API 时，apiResult 仍是 undefined；
+                    // 必须按“未执行/拒绝”处理，不能把旧库的 import 兜底误判为成功。
+                    if (!preciseApiCalled) {
+                        preciseRejected = true;
+                    } else if (apiResult !== false) {
                         saveSuccessful = true;
                     } else {
                         preciseRejected = true;

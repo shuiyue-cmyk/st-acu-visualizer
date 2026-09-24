@@ -38,6 +38,7 @@ SillyTavern 的「SP·数据库」可视化前端扩展。在聊天区渲染数�
 
 | 前端版本 | 适配数据库 | 说明 |
 |---|---|---|
+| V17.6.5 | 9.2.5 (599e358) + rebuild 9.6.8 (a3ebdd6)（双库） | 双库存储/API 复核：13 个公共方法、CRUD 行索引/返回契约、`row_id` 与中文表头→DDL 映射、`persisted` 回调、export 活引用及 `extra._acu_original_content` 均一致；历史“外部可视化前端保存失败”已由上游 `f983612` 修复。另修前端降级控制流：当前编辑对应的精确 API 缺失时不再把 `undefined` 当成功，只有数据库完全没有精确 API 时才允许 `importTableAsJson` 兜底 |
 | V17.6.4 | 9.2.5 + rebuild 9.6.2（双库） | 上游 9.2.4→9.2.5（26 笔：向量摘要镜像 V2 化/rowid 生命周期/交火行保留，表格身份按名归并与宽容回放、移除休眠数据面板）与自家库 9.1.1→9.6.2 双探针全绿——13 消费点签名不变、回调 dataToSend+meta.persisted 形状不变、export 活引用、原文 extra 写入契约不变，前端无逻辑变更 |
 | V17.6.3 | 9.2.4 + rebuild 9.1.1（双库） | 撤销 V17.6.2 的虚拟化限制：关闭前端后 fault 照现，证实与前端注入无关，恢复有界虚拟化下全楼层显示 |
 | V17.6.2 | 9.2.4 + rebuild 9.1.1（双库） | 修 TT 虚拟化 fault：有界虚拟化下被替换正文框强制仅最新一层（多楼层注入触发 message runtime source ownership diverged 致虚拟化停止）；非虚拟化/ST 仍全楼层 |
