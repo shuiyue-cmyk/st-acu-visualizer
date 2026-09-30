@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.6.9'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.6.10'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -1734,13 +1734,13 @@
     // 按表克隆(性能审查 P1-1):对比新旧逐表指纹,只深拷贝变化的 sheet,其余 sheet 复用旧缓存引用。
     // 保持「克隆副本」不变式(读/写路径依赖非 DB 引用副本),但粒度从全表降到单表——
     // 填表/追平期间通常只有 1-2 张表在变,其余表(如 8.3MB 里的历史大表)不再每次深拷贝。
-    const cloneTableDataPartial = (raw, oldCached) => {
+    const cloneTableDataPartial = (raw, oldCached, precomputedNewFp) => {
         if (!raw || typeof raw !== 'object') return raw;
         // cloneOne 双失败时返回 undefined（绝不返回 v——那会把 DB 活引用漏进缓存，
         // 后续就地写直接改 DB 运行时视图）；调用方检测到 undefined 退回全量克隆兜底。
         const cloneOne = (v) => { try { return structuredClone(v); } catch (_) { try { return JSON.parse(JSON.stringify(v)); } catch (__) { return undefined; } } };
         try {
-            const newFp = sheetFingerprints(raw);
+            const newFp = precomputedNewFp || sheetFingerprints(raw);
             const oldFp = sheetFingerprints(oldCached);
             const sheets = Object.keys(raw).filter(k => k.startsWith('sheet_'));
             // 表集合差检测(第二轮审查 P1-1-B):raw 与 oldCached 的 sheet key 列表不等
@@ -1781,6 +1781,24 @@
     let lastTableDataRefreshed = false;
     // 上次缓存的表集合指纹（sheet key 名 + 数量），用于捕获"引用不变但新增/删除了表"的建表场景
     let lastTableSetFingerprint = '';
+    // ⚠ 已知例外之二（本轮补）：missingSheets 的入选判据是「SQLite 里缺该物理表」
+    // （sql-table-service.ts `!existingTables.has(runtimeTableName)`），**不是**「视图里缺该 key」。
+    // 于是一张已存在于视图、但物理表缺失（休眠表恢复 / 删楼回滚重建 runtime / DDL 名解析变化）的表
+    // 会被 `currentView[key] = sheet` **整对象原地替换**——引用不变、key 集合也不变，
+    // 上面两个信号都不亮，旧写法会直接复用陈旧克隆：身份闸门拿陈旧数据自证通过，
+    // 而 DB 用它自己的新视图解析下标 → 写进另一行并返回 true（静默覆盖）。
+    // 故第三个信号必须是**逐表内容指纹**（sheetFingerprints 恒定采样表头行 r=0，
+    // 整表换掉必然改变它），成本只到"每表约 40 行采样"，远低于一次深拷贝。
+    let lastSheetFingerprints = null;
+    const sheetFingerprintsChanged = (newFp) => {
+        const oldFp = lastSheetFingerprints;
+        if (!oldFp) return true;
+        const nk = Object.keys(newFp);
+        const ok = Object.keys(oldFp);
+        if (nk.length !== ok.length) return true;
+        for (const k of nk) { if (newFp[k] !== oldFp[k]) return true; }
+        return false;
+    };
 
     // 轻量表集合指纹：只列 sheet key 名与数量，成本极低
     const tableSetFingerprint = (raw) => {
@@ -1800,19 +1818,23 @@
             // 引用未变时仍比对表集合：DB 建表场景会原地加 sheet key（引用不变但表集合变）
             const setFp = tableSetFingerprint(raw);
             const setChanged = setFp !== lastTableSetFingerprint;
-            // 引用未变 + 表集合未变 + 已有缓存 → 数据确实没动，复用缓存跳过 clone
-            if (forceRefresh && raw === lastRawTableRef && !setChanged && cachedTableData) {
+            // 第三信号：逐表内容指纹，捕获「引用不变 + 表集合不变 + 同 key 被整表原地替换」
+            const sheetFp = sheetFingerprints(raw);
+            const contentChanged = sheetFingerprintsChanged(sheetFp);
+            // 引用未变 + 表集合未变 + 逐表内容未变 + 已有缓存 → 数据确实没动，复用缓存跳过 clone
+            if (forceRefresh && raw === lastRawTableRef && !setChanged && !contentChanged && cachedTableData) {
                 lastTableDataRefreshed = false;
                 return cachedTableData;
             }
             lastRawTableRef = raw;
             lastTableSetFingerprint = setFp;
+            lastSheetFingerprints = sheetFp;
             lastTableDataRefreshed = true;
             // 关键：exportTableAsJson 返回的是 DB 内部 currentJsonTableData_ACU 的直接引用，
             // 必须深拷贝后再对外返回，否则前端的就地修改会绕过 DB 的事务/校验逻辑。
             // 性能审查 P1-1：按表克隆——只深拷贝指纹变化的 sheet，其余 sheet 复用旧缓存，
             // 填表/追平期间避免每 1.5-2s 全表 8.3MB 深拷贝。
-            const data = cloneTableDataPartial(raw, cachedTableData);
+            const data = cloneTableDataPartial(raw, cachedTableData, sheetFp);
             if (data) {
                 // R-2:仅当产生新对象(数据真正变化/表集合差全量)时递增 dataVersion;
                 // 指纹全同复用旧缓存时 data===cachedTableData,不递增,避免搜索缓存无谓失效。
@@ -5303,6 +5325,22 @@ const checkRowChanged = (realIdx, row) => {
                     return;
                 }
 
+                // 值未变则一律不写。原先无判据：空保存也会让 DB 走一次全量聊天回放 + 世界书重建
+                // + 固定 await 800ms，并把 NULL 空单元格改写成 ''（DB 写侧不归一化）；
+                // 更实际的危害是它必发的通知会经 handleUpdate 清掉用户已勾选的待删/选中状态。
+                // 仅在**确实读到模型旧值**时才短路，读不到就照旧走写入，避免把合法写入误吞。
+                let modelOldVal;
+                let modelReadable = false;
+                try {
+                    const cur = getTableData(false) || cachedTableData;
+                    const mRow = cur && tableKey ? cur[tableKey]?.content?.[rowIdx + 1] : null;
+                    if (Array.isArray(mRow) && colIdx >= 0 && colIdx < mRow.length) {
+                        modelOldVal = mRow[colIdx];
+                        modelReadable = true;
+                    }
+                } catch (_) { modelReadable = false; }
+                if (modelReadable && cellText(modelOldVal) === cellText(newVal)) return;
+
                 let $displayTarget = $cell;
                 if ($cell.hasClass('acu-grid-item')) $displayTarget = $cell.find('.acu-grid-value');
                 else if ($cell.hasClass('acu-full-item')) $displayTarget = $cell.find('.acu-full-value');
@@ -5498,18 +5536,52 @@ const checkRowChanged = (realIdx, row) => {
                 let hasChanges = false;
                 let updateObj = {};
                 const oldRow = currentRow.slice(); // 保存失败时的回滚基线
+                // ── 第一段：只收集改动并校验列名，不写任何东西 ──
+                // 两类必须拒提交的列名（都在 DB 侧核实过，非猜测）：
+                // ① 空表头：updateRow 按列名寻址，无名列写不进去。原先 `if (openHeaders[colIdx])`
+                //    直接跳过该列，但同行其它列仍会提交并返回 true → 前端弹「保存成功」，
+                //    用户这一列的改动被静默还原。
+                // ② 与 DB 提交选项同名的列：table-crud-api.ts 的 parseMutationOptions_ACU(options, rowData)
+                //    会从**数据对象的键**里读 isImportMode → skipChatSave、skipNotify/silent → skipNotify。
+                //    于是一列叫 `silent` 且格子里填了 true/1/yes，就会把这次普通编辑降级成
+                //    "只改运行时不落盘"甚至"连通知都不发"，而前端照旧弹「保存成功」。
+                //    updateCell 不受影响（它不传 rowData），所以只需守这条路径。
+                const RESERVED_OPTION_KEYS = ['isimportmode', 'skipnotify', 'silent'];
+                const pendingWrites = [];
+                let rejectReason = '';
                 dialog.find('textarea').each(function () {
                     const colIdx = parseInt($(this).data('col'));
                     const newVal = $(this).val();
                     // 用 cellText 归一：DB 空单元格是 null，String(null)==="null" 会让
                     // 「空单元格 + 未修改」被误判为有改动并把 "" 当新值写回。
                     if (cellText(currentRow[colIdx]) !== cellText(newVal)) {
+                        const rawHeader = openHeaders[colIdx];
+                        // 只用于判空/判撞名；真正提交的键仍是原始表头文本（不 trim），
+                        // 保持与改动前一致的列名解析行为。
+                        const header = cellText(rawHeader).trim();
+                        if (!header) {
+                            rejectReason = `第 ${colIdx + 1} 列没有可用列名，无法按列名定位写入`;
+                            return false;
+                        }
+                        if (RESERVED_OPTION_KEYS.indexOf(header.toLowerCase()) >= 0) {
+                            rejectReason = `列名「${header}」与数据库的提交选项同名，从面板写入会被误判为提交参数`;
+                            return false;
+                        }
                         hasChanges = true;
-                        currentRow[colIdx] = newVal;
-                        // 用打开时冻结的表头，保证写入的列名与闸门校验的列名同源
-                        if (openHeaders[colIdx]) updateObj[openHeaders[colIdx]] = newVal;
+                        pendingWrites.push({ colIdx, newVal, key: rawHeader });
                     }
                 });
+                if (rejectReason) {
+                    // 拒绝提交：不关弹窗、不写缓存、不发通知，用户可改完再存。
+                    if (window.toastr) window.toastr.error(`${rejectReason}，已放弃本次保存。`);
+                    return;
+                }
+                // ── 第二段：校验通过后统一落笔 ──
+                for (const w of pendingWrites) {
+                    currentRow[w.colIdx] = w.newVal;
+                    // 用打开时冻结的表头，保证写入的列名与闸门校验的列名同源
+                    updateObj[w.key] = w.newVal;
+                }
                 if (hasChanges) {
                     const ok = await saveDataToDatabase(currentData, false, {
                         type: 'row_edit',
