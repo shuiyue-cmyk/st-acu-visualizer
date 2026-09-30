@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.6.5'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.6.6'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -31,6 +31,9 @@
 
     let isInitialized = false;
     let isSaving = false;
+    // 保存请求串行化：连续编辑排队执行，避免第二次调用被 isSaving 直接拒绝，
+    // 进而让调用方误把仍在队列中的编辑当成失败并回滚。
+    let saveQueue = Promise.resolve();
     // 批量 deleteRow 循环进行中：挂起 handleUpdate（见刷新按钮流程注释）
     let bulkOpActive = false;
     // meta.persisted=false 提示的节流时间戳
@@ -1764,7 +1767,7 @@
         } catch (_) { return ''; }
     };
 
-    const saveDataToDatabase = async (tableData, skipRender = false, updateContext = null) => {
+    const saveDataToDatabaseImpl = async (tableData, skipRender = false, updateContext = null) => {
         if (isSaving) return false;
         if (tableData && typeof tableData === 'object') {
             if (!tableData.mate) {
@@ -1866,6 +1869,15 @@
                 $saveBtn.html(originalIcon || '<i class="fa-solid fa-save"></i>').prop('disabled', false);
             }
         }
+    };
+
+    // 串行包装层：无论调用方是否在上一笔保存完成前再次编辑，第二次请求都会排队，
+    // 而不是直接返回 false 让上层把乐观值回滚并误报保存失败。
+    const saveDataToDatabase = (tableData, skipRender = false, updateContext = null) => {
+        const run = () => saveDataToDatabaseImpl(tableData, skipRender, updateContext);
+        const queued = saveQueue.then(run, run);
+        saveQueue = queued.catch(() => {});
+        return queued;
     };
 
     const processJsonData = (json) => {
@@ -4180,7 +4192,10 @@ const checkRowChanged = (realIdx, row) => {
         }
     };
 
-    const bindEvents = (tables) => {
+    const bindEvents = (initialTables) => {
+        // 切表兜底刷新会替换数据快照；必须让后续事件闭包也看到同一份新表，
+        // 否则分页/搜索/视图切换会用旧 tables 把新数据覆盖回陈旧视图。
+        let tables = initialTables;
         const { $ } = getCore();
         const stopSelectors = '.acu-data-display, .acu-nav-container, .acu-wrapper, .acu-edit-overlay, .acu-quick-view-overlay, .acu-cell-menu';
         $('body').off('wheel touchstart touchmove touchend click', stopSelectors).on('wheel touchstart touchmove touchend click', stopSelectors, function(e) {
@@ -4222,7 +4237,13 @@ const checkRowChanged = (realIdx, row) => {
                 if (!inEditingContext() && !catchupTimer) {
                     const freshRaw = getTableData(true);
                     if (freshRaw && lastTableDataRefreshed) {
-                        try { effectiveTables = processJsonData(freshRaw); } catch (_) { effectiveTables = tables; }
+                        try {
+                            effectiveTables = processJsonData(freshRaw);
+                            // 同步更新闭包持有的表快照，并失效可能由旧数据生成的搜索结果。
+                            tables = effectiveTables;
+                            searchCacheKey = '';
+                            searchCacheResult = null;
+                        } catch (_) { effectiveTables = tables; }
                     }
                 }
             } catch (_) {}
@@ -5110,21 +5131,28 @@ const checkRowChanged = (realIdx, row) => {
                     newRowObj[colName] = '';
                 }
                 const api = getCore().getDB();
+                const hasInsertApi = !!(api && typeof api.insertRow === 'function');
                 if (window.toastr) window.toastr.info('正在插入新行...');
                 let ok = false;
                 try {
-                    if (api && typeof api.insertRow === 'function') {
+                    if (hasInsertApi) {
                         const result = await api.insertRow(tableName, newRowObj);
                         ok = (result !== false && result !== -1 && result !== null && result !== undefined);
                     }
                 } catch (e) { console.warn('[ACU-API] insertRow 调用失败:', e); ok = false; }
-                // 兜底：旧版 DB 无 insertRow 或调用失败时退回全量保存，但绝不伪造 row_id。
-                // 位置语义对齐 DB insertRow（始终表尾 push）：兜底也 push 到表尾，而非菜单所在行后。
+                // 有 insertRow 时 DB 已拒绝本次精确写，不得降级全量 data_replace；
+                // 直接报告失败，避免全量保存路径再弹一条互相矛盾的 toast。
+                if (!ok && hasInsertApi) {
+                    if (window.toastr) window.toastr.error('插入新行失败：数据库未接受本次写入，请稍后重试。');
+                    return;
+                }
+                // 仅当旧库完全没有 insertRow 时才允许全量保存兜底；位置语义对齐 DB
+                // insertRow（始终表尾 push），不伪造 row_id。
                 if (!ok) {
                     const newRow = headers.map(() => '');
                     sheet.content.push(newRow);
                     let savedOk = false;
-                    try { savedOk = (await saveDataToDatabase(rawData, false)) !== false; } catch (e) { console.warn('[ACU-API] 兜底保存异常:', e); }
+                    try { savedOk = (await saveDataToDatabase(rawData, false)) === true; } catch (e) { console.warn('[ACU-API] 兜底保存异常:', e); }
                     if (!savedOk) {
                         sheet.content.pop(); // 保存失败:回滚幻影行,避免缓存残留
                         if (window.toastr) window.toastr.error('插入新行失败，已回滚。');
