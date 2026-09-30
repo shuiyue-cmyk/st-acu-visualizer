@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.6.10'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.7.1'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -24,8 +24,38 @@
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
     
+    // 读取数据库的**活引用**（不是前端的缓存克隆），专供身份复验使用。
+    //
+    // 为什么必须这样：exportTableAsJson 返回的是 DB 内部 currentJsonTableData_ACU 的
+    // 直接引用，而 DB 的 _ensureTablesFromTemplate 在「SQLite 缺该物理表」时执行
+    // currentView[key] = sheet —— 整对象原地替换，顶层引用不变、sheet key 集合也不变。
+    // 这时前端的缓存克隆（getTableData 的返回值）可能是旧的：身份闸门若拿旧克隆
+    // 自证通过，而 DB 写库时用它自己的新视图解析下标，不可逆写入就落到**另一行**
+    // 并返回 true —— 静默覆盖，且无法撤销。
+    // 活引用是自更新的：任何持有者都能看到原地替换后的新 sheet，所以复验读它才可靠。
+    //
+    // 只读用途，绝不写它：一旦把活引用写进去就绕过了 DB 的事务/校验。
+    // 读不到（老 API / 异常）时返回 null，由调用方退回 getTableData 的既有路径。
+    const readLiveTableData = () => {
+        try {
+            const api = getCore().getDB();
+            return api && api.exportTableAsJson ? api.exportTableAsJson() : null;
+        } catch (_) { return null; }
+    };
+
     // 取某数据行的 row_id（content[0] 是表头，数据行从 content[1] 起，row_id 占行内 0 位）。
     // 取不到返回 null，调用方据此决定「无法复验」时是否放行。
+    //
+    // 这里读**缓存**是刻意的，不是遗漏：身份复验的两个数据源分工明确——
+    //   · 锚点（本函数、identityHeader、openHeaders、勾选时的 pendingDeleteRowIds）
+    //     必须取自**用户看见的那份数据**，即渲染所用的缓存。用户对哪一行点了编辑，
+    //     锚点就得是那一行；若锚点也改读活引用，「渲染之后、点开之前」发生的行变更
+    //     就变得不可见，闸门会拿 DB 的现状去印证用户的操作 → 用户改的是所见、
+    //     写进去的是另一行。
+    //   · 基准（verifyRowIdentity、批量删复验快照、弹窗保存时的 freshData）
+    //     必须取自**活引用**，因为缓存可能因同 key 整表原地替换而陈旧，
+    //     拿陈旧缓存当基准等于没比（这才是本轮修的那条静默覆盖）。
+    // 两者一静一动，缺一不可；都读活引用会丢掉前者，都读缓存会丢掉后者。
     const readRowId = (tableKey, rowIndex) => {
         try {
             const data = getTableData(false) || cachedTableData;
@@ -44,7 +74,12 @@
     // 无法取到 row_id（老库无该列）时退化为只比表头文本，维持旧库可用。
     const verifyRowIdentity = (tableKey, rowIndex, expectedRowId, colIndex, expectedHeader) => {
         try {
-            const data = getTableData(true);
+            // 基准读活引用，不读缓存克隆（理由见 readLiveTableData / readRowId 的注释）。
+            // 锚点来自用户所见（缓存），基准来自 DB 现状（活引用）——两者必须不同源。
+            // 活引用里没有该表时退回 getTableData(true)：那一刻缓存刚被刷过，
+            // 拿不到活引用只可能是 API 缺失/抛错，此时仍要有路可走而不是直接放行。
+            const live = readLiveTableData();
+            const data = (live && live[tableKey]) ? live : getTableData(true);
             const content = data && tableKey && data[tableKey] ? data[tableKey].content : null;
             if (!Array.isArray(content)) return { ok: false, reason: '表格数据已更新' };
             const row = content[rowIndex + 1];
@@ -1701,6 +1736,13 @@
 
     // 逐表轻量指纹(性能审查 P1-1):对每个 sheet 独立算指纹,用于定位「哪几张表真的变了」,
     // 支持只 clone 变化表、复用其余表缓存(避免填表/追平期间每 1.5-2s 全表深拷贝 8.3MB)。
+    //
+    // ⚠ 采样边界(勿夸大):步长是 ceil(content.length/40),所以 **content.length ≤ 40 时是
+    // 全行覆盖**(含表头行,表头行恒被采样 → 列增删/列位移必被检出);超过 40 行即隔行抽样,
+    // 「行数不变、列数不变、仅未采样中间行的值不同」这种替换不会被检出。
+    // 这是**已知取舍**(全量取值等于一次深拷贝,正是 P1-1 要避免的),不是已消除的盲区。
+    // 写安全不依赖本信号——身份闸门读的是 DB 活引用(见 readLiveTableData),
+    // 因此这里的漏检最坏只表现为「显示略滞后」,不会导致写错行。
     const sheetFingerprints = (data) => {
         const out = {};
         if (!data || typeof data !== 'object') return out;
@@ -1710,7 +1752,8 @@
                 const s = data[k];
                 if (!s || !Array.isArray(s.content) || s.content.length === 0) { out[k] = k + ':0;'; continue; }
                 let fp = k + ':' + s.content.length + ';';
-                // 全列采样 + 均匀约 40 行覆盖全表(步长随行数缩放),消除中间行盲区
+                // 全列采样 + 均匀约 40 行覆盖(步长随行数缩放)。注意边界:
+                // content.length ≤ 40 → step=1 → 全行覆盖;> 40 → 隔行抽样(见上方说明)。
                 const n = s.content.length;
                 const step = Math.max(1, Math.ceil(n / 40));
                 for (let r = 0; r < n; r += step) {
@@ -1781,14 +1824,17 @@
     let lastTableDataRefreshed = false;
     // 上次缓存的表集合指纹（sheet key 名 + 数量），用于捕获"引用不变但新增/删除了表"的建表场景
     let lastTableSetFingerprint = '';
-    // ⚠ 已知例外之二（本轮补）：missingSheets 的入选判据是「SQLite 里缺该物理表」
+    // ⚠ 已知例外之二：missingSheets 的入选判据是「SQLite 里缺该物理表」
     // （sql-table-service.ts `!existingTables.has(runtimeTableName)`），**不是**「视图里缺该 key」。
     // 于是一张已存在于视图、但物理表缺失（休眠表恢复 / 删楼回滚重建 runtime / DDL 名解析变化）的表
     // 会被 `currentView[key] = sheet` **整对象原地替换**——引用不变、key 集合也不变，
-    // 上面两个信号都不亮，旧写法会直接复用陈旧克隆：身份闸门拿陈旧数据自证通过，
-    // 而 DB 用它自己的新视图解析下标 → 写进另一行并返回 true（静默覆盖）。
-    // 故第三个信号必须是**逐表内容指纹**（sheetFingerprints 恒定采样表头行 r=0，
-    // 整表换掉必然改变它），成本只到"每表约 40 行采样"，远低于一次深拷贝。
+    // 上面两个信号都不亮，缓存克隆会陈旧。
+    //
+    // 职责分工（重要，别把安全寄托在指纹上）：
+    //   · **写安全**由 readLiveTableData 承担——身份闸门读 DB 活引用，
+    //     活引用是自更新的，原地替换对任何持有者立即可见，故不依赖任何采样启发式。
+    //   · 第三个信号只负责**渲染新鲜度**：尽量少做无谓的深拷贝，同时让显示跟上数据。
+    //     它的边界见 sheetFingerprints 上方说明（content.length ≤ 40 全覆盖，超过则抽样）。
     let lastSheetFingerprints = null;
     const sheetFingerprintsChanged = (newFp) => {
         const oldFp = lastSheetFingerprints;
@@ -4740,7 +4786,9 @@ const checkRowChanged = (realIdx, row) => {
                     // 注意 getTableData() 以 sheetId 为键，而 group 以表名为键，
                     // 必须经 processJsonData 还原「表名 → sheetKey」映射后才能取到 content。
                     let verifyTables = null;
-                    try { verifyTables = processJsonData(getTableData(true) || {}); } catch (_) { verifyTables = null; }
+                    // 复验快照同样取自 DB 活引用（理由见 readLiveTableData）：缓存克隆可能
+                    // 因「同 key 整表原地替换」而陈旧，拿它比对 row_id 等于没比。取不到才退回缓存。
+                    try { verifyTables = processJsonData(readLiveTableData() || getTableData(true) || {}); } catch (_) { verifyTables = null; }
                     const isRowStillSame = (t, r) => {
                         // 无 row_id 可比（老库/脏数据）时保持既有行为，不额外拦截。
                         const expected = pendingDeleteRowIds.get(`${t}-row-${r}`);
@@ -5507,7 +5555,9 @@ const checkRowChanged = (realIdx, row) => {
             // 寻址，列名错配会静默写进另一列且 DB 返回 true）。
             // 比对基准是【打开时】冻结的 openRowId / openHeaders —— 若在保存时才取 row_id，
             // DB 已发通知的场景下会比成"刷新后 vs 刷新后"，闸门恒过。
-            const freshData = getTableData(true);
+            // 复验基准同样取自 DB 活引用（理由见 readLiveTableData）：缓存克隆可能因
+            // 「同 key 整表原地替换」而陈旧，拿它比对等于「刷新后 vs 刷新后」，闸门恒过。
+            const freshData = readLiveTableData() || getTableData(true);
             const freshHeaders = (freshData && tableKey && Array.isArray(freshData[tableKey]?.content?.[0]))
                 ? freshData[tableKey].content[0] : null;
             let identityBroken = false;

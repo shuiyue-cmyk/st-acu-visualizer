@@ -39,12 +39,13 @@ SillyTavern 的「SP·数据库」可视化前端扩展。在聊天区渲染数�
 - **主基线**：TauriTavern（TT 酒馆）+ 数据库 [`shuiyue-cmyk/shujuku-rebuild`](https://github.com/shuiyue-cmyk/shujuku-rebuild)
 - **次基线**：SillyTavern（ST 酒馆）+ 数据库 [`AlbusKen/shujuku`](https://github.com/AlbusKen/shujuku)
 
-**当前版本 V17.6.10 适配 TT 库 `9.10.3`（`93eca17`）/ ST 库 `9.2.5`（`599e358`）。**
+**当前版本 V17.7.1 适配 TT 库 `9.10.3`（`93eca17`）/ ST 库 `9.2.5`（`599e358`）。**
 
 逐版本的变更说明见 [CHANGELOG.md](CHANGELOG.md)。
 
 | 前端版本 | ST 数据库 | TT 数据库（shujuku-rebuild） |
 |---|---|---|
+| V17.7.1 | 9.2.5 | 9.10.3 |
 | V17.6.10 | 9.2.5 | 9.10.3 |
 | V17.6.5 ~ V17.6.9 | 9.2.5 | 9.6.8 |
 | V17.6.4 | 9.2.5 | 9.6.2 |
@@ -66,6 +67,18 @@ SillyTavern 的「SP·数据库」可视化前端扩展。在聊天区渲染数�
 - 二改：a1185673398
 - 三改：星火（已休眠）
 - 现维护：Crino
+
+### 测试
+
+零依赖，改完代码跑一下：
+
+```bash
+node tests/run-all.js                        # 295 项断言
+python tests/sabotage-matrix.py              # 注入矩阵：验证测试本身有效
+node tests/run-all.js --db <TT库> --db <ST库>   # 附带跨仓数据库契约（共 359 项，数据库更新后必跑）
+```
+
+所守契约与设计取舍见 [`tests/README.md`](tests/README.md)。
 
 ---
 
