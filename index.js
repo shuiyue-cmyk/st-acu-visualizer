@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.6.7'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.6.8'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -24,6 +24,53 @@
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
     
+    // 取某数据行的 row_id（content[0] 是表头，数据行从 content[1] 起，row_id 占行内 0 位）。
+    // 取不到返回 null，调用方据此决定「无法复验」时是否放行。
+    const readRowId = (tableKey, rowIndex) => {
+        try {
+            const data = getTableData(false) || cachedTableData;
+            const content = data && tableKey && data[tableKey] ? data[tableKey].content : null;
+            const row = Array.isArray(content) ? content[rowIndex + 1] : null;
+            if (!Array.isArray(row)) return null;
+            const rid = row[0];
+            return (rid === null || rid === undefined) ? null : String(rid);
+        } catch (_) { return null; }
+    };
+
+    // 复验「弹窗打开时看到的那一行/那一列」是否仍是当前的那一行/列。
+    // 两条编辑弹窗都 append 在 body 上，不在 .acu-wrapper 内，DB 通知触发的 wrapper 重建
+    // 不会销毁它们 —— 于是弹窗里的 data-row/data-col 与捕获的 headers 可能已陈旧。
+    // 用 row_id 锚定行、用表头文本锚定列，任何一项对不上都拒绝提交（不可逆写入的闸门）。
+    // 无法取到 row_id（老库无该列）时退化为只比表头文本，维持旧库可用。
+    const verifyRowIdentity = (tableKey, rowIndex, expectedRowId, colIndex, expectedHeader) => {
+        try {
+            const data = getTableData(true);
+            const content = data && tableKey && data[tableKey] ? data[tableKey].content : null;
+            if (!Array.isArray(content)) return { ok: false, reason: '表格数据已更新' };
+            const row = content[rowIndex + 1];
+            if (!Array.isArray(row)) return { ok: false, reason: '目标行已不存在' };
+            if (expectedRowId) {
+                const actual = row[0];
+                if (actual === null || actual === undefined || String(actual) !== expectedRowId) {
+                    return { ok: false, reason: '目标行已变化' };
+                }
+            }
+            if (expectedHeader != null) {
+                const headers = Array.isArray(content[0]) ? content[0] : [];
+                const actualHeader = headers[colIndex];
+                if ((actualHeader == null ? '' : String(actualHeader)) !== String(expectedHeader)) {
+                    return { ok: false, reason: '目标列已变化' };
+                }
+            }
+            return { ok: true };
+        } catch (_) { return { ok: false, reason: '数据校验失败' }; }
+    };
+
+    // 单元格取文本：DB 用 null 表示空单元格（schema-mapper valueToString(null) → null，
+    // 写入侧 escapeValue(null) → 'NULL'，两侧都不归一化成 ''）。直接 String(null) 会得到
+    // 字面量 "null"，既污染显示与搜索，又会被 readCellValue 兜底当成真实内容写回库。
+    const cellText = (cell) => (cell === null || cell === undefined ? '' : String(cell));
+
     const TAB_DASHBOARD = 'acu_tab_dashboard_home';
     const STORAGE_KEY_DASH_CONFIG = 'acu_dash_config_v1';
     let isDashEditing = false;
@@ -65,6 +112,11 @@
     let cachedTableData = null;
     let isMultiSelectMode = false;
     let pendingDeletes = new Set();
+    // 勾选待删时记下该行 content[r+1][0] 的 row_id（DB 侧稳定行身份）。
+    // pendingDeletes 只存「表名-行下标」，而下标在 DB 发生无通知写入后会错位
+    // （工作台「一键追平」走 refreshMergedDataAndNotify_ACU，全程不发 _notifyTableUpdate），
+    // 照旧下标 deleteRow 会不可逆地删错行且 DB 返回 true。删除前用 row_id 复验来兜住。
+    let pendingDeleteRowIds = new Map();
 
     // 追平完成检测轮询的模块级单例状态：防止连点多个 setInterval 并存、双 finishCatchup。
     let catchupTimer = null;
@@ -125,6 +177,7 @@
             // 否则确认删除时会按旧下标删错行（9.0 row_id 为稳定身份，前端只有下标）。
             const hadRowIntent = pendingDeletes.size > 0 || selectedRows.size > 0;
             pendingDeletes.clear();
+            pendingDeleteRowIds.clear();
             selectedRows.clear();
             renderInterface(true);
             if (hadRowIntent && window.toastr) {
@@ -1782,8 +1835,12 @@
             const content = sheet && Array.isArray(sheet.content) ? sheet.content : null;
             if (content) {
                 const row = content[rowIdx + 1];
-                if (row && row[colIdx] !== undefined && row[colIdx] !== null) {
-                    return String(row[colIdx]);
+                if (Array.isArray(row)) {
+                    // 空单元格(null/undefined)是有效取值，必须返回 '' 而不是继续往下走：
+                    // 走到 DOM 兜底会把页面上渲染出的字面量 "null" 当成原文，用户不改直接保存
+                    // 就会把字符串 "null" 持久化进数据库。
+                    if (colIdx >= 0 && colIdx < row.length) return cellText(row[colIdx]);
+                    return '';
                 }
             }
         } catch (_) { /* 走可见文本兜底 */ }
@@ -1792,7 +1849,7 @@
             const $c = $(cell);
             const $t = $c.find('.acu-grid-value, .acu-full-value, .acu-inline-value, .acu-editable-title').first();
             const txt = ($t.length ? $t.text() : $c.text());
-            return txt != null ? String(txt) : '';
+            return cellText(txt);
         } catch (_) { return ''; }
     };
 
@@ -4065,7 +4122,7 @@ const checkRowChanged = (realIdx, row) => {
                 if (!currentSearchTerm) return items;
                 const term = String(currentSearchTerm).toLowerCase();
                 // 逐格 toLowerCase + some() 短路(匹配列靠前即停),单次过滤比整行 join 快
-                return items.filter(item => item.data && item.data.some(cell => String(cell).toLowerCase().includes(term)));
+                return items.filter(item => item.data && item.data.some(cell => cellText(cell).toLowerCase().includes(term)));
             };
             const doSort = (items) => {
                 items.sort((a, b) => {
@@ -4175,7 +4232,9 @@ const checkRowChanged = (realIdx, row) => {
             row.forEach((cell, cIdx) => {
                 if (cIdx > 0 && cIdx !== titleColIndex) {
                     const headerName = headers[cIdx - 1] || `属性${cIdx}`;
-                    const cellStr = String(cell);
+                    // 保留 cellStr 绑定：下方 grid/full 视图分支用未 trim 的 cellStr.length > 50
+                    // 决定长文本走整行还是走宫格。归一用 cellText，阈值语义与基线保持一致。
+                    const cellStr = cellText(cell);
                     const displayCell = cellStr.trim();
                     if (displayCell === 'auto_merged') return;
                     const isCellChanged = currentDiffMap.has(`${tableName}-${realIndex}-${cIdx}`);
@@ -4234,6 +4293,7 @@ const checkRowChanged = (realIdx, row) => {
         isMultiSelectMode = false;
         selectedRows.clear();
         pendingDeletes.clear();
+        pendingDeleteRowIds.clear();
         if (typeof updateDynamicActionButton === 'function') updateDynamicActionButton();
         $('.acu-nav-btn').removeClass('active');
         saveActiveTabState(null);
@@ -4280,6 +4340,7 @@ const checkRowChanged = (realIdx, row) => {
             isMultiSelectMode = false;
             selectedRows.clear();
             pendingDeletes.clear();
+            pendingDeleteRowIds.clear();
             currentPage = 1;
             currentSearchTerm = '';
             globalScrollTop = 0;
@@ -4387,6 +4448,7 @@ const checkRowChanged = (realIdx, row) => {
                 Array.from(selectedRows.values()).forEach(item => {
                     if (item.tableName === tableName) {
                         pendingDeletes.delete(`${tableName}-row-${item.rowIndex}`);
+                        pendingDeleteRowIds.delete(`${tableName}-row-${item.rowIndex}`);
                     }
                 });
 
@@ -4419,6 +4481,7 @@ const checkRowChanged = (realIdx, row) => {
                     selectedRows.set(rowKey, { tableName, rowIndex, key });
                     $card.addClass('acu-card-selected');
                     pendingDeletes.add(delKey);
+                    pendingDeleteRowIds.set(delKey, readRowId(key, rowIndex));
                     if ($card.find('.acu-badge-pending').length === 0) {
                         $card.prepend('<div class="acu-badge-pending">待删除</div>');
                     }
@@ -4426,6 +4489,7 @@ const checkRowChanged = (realIdx, row) => {
                     selectedRows.delete(rowKey);
                     $card.removeClass('acu-card-selected');
                     pendingDeletes.delete(delKey);
+                    pendingDeleteRowIds.delete(delKey);
                     $card.find('.acu-badge-pending').remove();
                 }
 
@@ -4585,6 +4649,28 @@ const checkRowChanged = (realIdx, row) => {
                     }
                     let failedRows = 0;
                     let failedTableNames = [];
+                    // 复验用的表快照：pendingDeletes 记的是「勾选时刻的行下标」，
+                    // 若期间 DB 发生无通知写入（工作台「一键追平」等）导致行插入/删除，
+                    // 同一行下标已指向别的行。deleteRow 不可逆，故删除前按 row_id 复验：
+                    // 不一致就跳过该行并计入失败，走既有提示通道，绝不按陈旧下标删错行。
+                    // 注意 getTableData() 以 sheetId 为键，而 group 以表名为键，
+                    // 必须经 processJsonData 还原「表名 → sheetKey」映射后才能取到 content。
+                    let verifyTables = null;
+                    try { verifyTables = processJsonData(getTableData(true) || {}); } catch (_) { verifyTables = null; }
+                    const isRowStillSame = (t, r) => {
+                        // 无 row_id 可比（老库/脏数据）时保持既有行为，不额外拦截。
+                        const expected = pendingDeleteRowIds.get(`${t}-row-${r}`);
+                        if (expected === undefined || expected === null || expected === '') return true;
+                        try {
+                            const entry = verifyTables && verifyTables[t];
+                            const content = entry && Array.isArray(entry.rows) ? entry.rows : null;
+                            const row = Array.isArray(content) ? content[r] : null;
+                            if (!Array.isArray(row)) return false;
+                            const actual = row[0];
+                            if (actual === null || actual === undefined) return false;
+                            return String(actual) === expected;
+                        } catch (_) { return false; }
+                    };
                     // 批量删期间挂起 handleUpdate：循环中每次 deleteRow 都触发 DB 通知，
                     // 通知到达时 deleteRow 的 await 未落定，getTableData(true) 会拉到中间态，
                     // 该中间态一旦被写路径回灌就是 data_replace 冲突源（DB 作者指出的高危模式）。
@@ -4594,6 +4680,11 @@ const checkRowChanged = (realIdx, row) => {
                         for (const t in group) {
                             const rows = group[t].sort((a,b) => b - a);
                             for (const r of rows) {
+                                if (!isRowStillSame(t, r)) {
+                                    // 行已易位：拒绝按陈旧下标删除，计入失败让用户知情。
+                                    failedRows++; if (!failedTableNames.includes(t)) failedTableNames.push(t);
+                                    continue;
+                                }
                                 try {
                                     const res = await api.deleteRow(t, r + 1);
                                     // DB 8.9 deleteRow 只返回 true/false；放宽为 res !== true 防御未来返回 -1 等
@@ -4605,6 +4696,7 @@ const checkRowChanged = (realIdx, row) => {
                         bulkOpActive = false;
                     }
                     pendingDeletes.clear();
+                    pendingDeleteRowIds.clear();
                     isMultiSelectMode = false;
                     selectedRows.clear();
                     if (window.toastr) {
@@ -4834,6 +4926,7 @@ const checkRowChanged = (realIdx, row) => {
                     currentDiffMap.clear();
                     // 追平结束全量重拉：行下标已重排，清按旧下标的待删/选中态防删错行
                     pendingDeletes.clear();
+                    pendingDeleteRowIds.clear();
                     selectedRows.clear();
                     try { const d = getTableData(true); if (d) saveSnapshot(d); } catch (e) { console.error('[ACU] 追平结束重拉失败:', e); }
                     try { renderInterface(true); } catch (e) { console.error('[ACU] 追平结束刷新失败:', e); }
@@ -4867,6 +4960,7 @@ const checkRowChanged = (realIdx, row) => {
                             lastTableDataRefreshed = true;
                             // 追平写入会增删行：按旧下标的待删/选中态失效，防止确认删除删错行
                             pendingDeletes.clear();
+                            pendingDeleteRowIds.clear();
                             selectedRows.clear();
                             try { renderInterface(true); } catch (e) { console.error('[ACU] 追平即时刷新失败:', e); }
                         } else {
@@ -4934,7 +5028,7 @@ const checkRowChanged = (realIdx, row) => {
         row.forEach((cell, cIdx) => {
              if (cIdx > 0) {
                 const headerName = headers[cIdx] || `属性${cIdx}`;
-                const cellStr = String(cell);
+                const cellStr = cellText(cell);
                 const displayCell = cellStr.trim();
                 if (displayCell === 'auto_merged') return;
                 const escHeader = escapeHtml(headerName);
@@ -5106,6 +5200,7 @@ const checkRowChanged = (realIdx, row) => {
         menu.find('#act-delete').click(() => {
             closeAll();
             pendingDeletes.add(deleteKey);
+            pendingDeleteRowIds.set(deleteKey, readRowId(tableKey, rowIdx));
             const $card = $(`.acu-data-card[data-row-key="${CSS.escape(tableName)}-${rowIdx}"]`);
             if ($card.length && $card.find('.acu-badge-pending').length === 0) {
                 $card.prepend('<div class="acu-badge-pending">待删除</div>');
@@ -5115,6 +5210,7 @@ const checkRowChanged = (realIdx, row) => {
         menu.find('#act-restore').click(() => {
             closeAll();
             pendingDeletes.delete(deleteKey);
+            pendingDeleteRowIds.delete(deleteKey);
             const $card = $(`.acu-data-card[data-row-key="${CSS.escape(tableName)}-${rowIdx}"]`);
             $card.find('.acu-badge-pending').remove();
             updateDynamicActionButton();
@@ -5122,11 +5218,28 @@ const checkRowChanged = (realIdx, row) => {
 
         menu.find('#act-edit').click(() => { 
             closeAll();
+            // 打开弹窗时锚定身份：弹窗挂在 body 上，DB 通知重建 wrapper 不会销毁它，
+            // 期间若发生行增删或列位移，弹窗里的下标就指向了别的行/列。
+            const identityRowId = readRowId(tableKey, rowIdx);
+            let identityHeader = null;
+            try {
+                const h = cachedTableData && tableKey ? cachedTableData[tableKey]?.content?.[0] : null;
+                identityHeader = Array.isArray(h) ? cellText(h[colIdx]) : null;
+            } catch (_) { identityHeader = null; }
             showEditDialog(content, async (newVal) => {
                 const $cell = $(cell);
                 // 单元格不再存 data-val，模型以 content[rowIdx+1][colIdx] 为准。
                 // 缓存同步挪到下面紧邻持久化处做，这样失败回滚能一并撤回，
                 // 否则 save 静默失败时缓存里会一直留着 DB 拒绝掉的值。
+
+                // 身份闸门：确认目标行/列仍是打开弹窗时那一行/列，否则放弃本次写入。
+                const ident = verifyRowIdentity(tableKey, rowIdx, identityRowId, colIdx, identityHeader);
+                if (!ident.ok) {
+                    cachedTableData = null; lastRawTableRef = null; lastTableSetFingerprint = '';
+                    try { renderInterface(true); } catch (_) {}
+                    if (window.toastr) window.toastr.warning(`${ident.reason}，已放弃本次编辑，请重新打开后修改。`);
+                    return;
+                }
 
                 let $displayTarget = $cell;
                 if ($cell.hasClass('acu-grid-item')) $displayTarget = $cell.find('.acu-grid-value');
@@ -5241,11 +5354,17 @@ const checkRowChanged = (realIdx, row) => {
         if (rawData && rawData[tableKey] && rawData[tableKey].content[rowIndex + 1]) {
             displayRow = rawData[tableKey].content[rowIndex + 1];
         }
+        // 打开弹窗这一刻锚定行身份。必须在打开时取：DB 若已发过通知，handleUpdate 会清缓存并
+        // 重建 wrapper（弹窗挂在 body 上不受影响），到保存时再取就只会比对"刷新后 vs 刷新后"，
+        // 闸门恒过。openHeaders 同样冻结打开时的表头，用于列位移比对。
+        const openRowId = readRowId(tableKey, rowIndex);
+        const openHeaders = Array.isArray(headers) ? headers.slice() : [];
 
         const inputsHtml = displayRow.map((cell, idx) => {
             if (idx === 0) return '';
             const headerName = headers[idx] || `Column ${idx}`;
-            const val = cell || '';
+            // 用 cellText 而非 `cell || ''`：后者会把 0 / false 这类合法值当成空。
+            const val = cellText(cell);
             return `
                 <div class="acu-card-edit-field">
                     <label class="acu-card-edit-label">${escapeHtml(headerName)}</label>
@@ -5281,6 +5400,33 @@ const checkRowChanged = (realIdx, row) => {
         dialog.find('#dlg-card-cancel').click(closeDialog);
 
         dialog.find('#dlg-card-save').click(async () => {
+            // 身份闸门：弹窗挂在 body 上，DB 通知重建 wrapper 不会销毁它。期间若行被增删
+            // 或列被插入/删除，捕获的 rowIndex 与表头会指向别的行/列（updateRow 按列名
+            // 寻址，列名错配会静默写进另一列且 DB 返回 true）。
+            // 比对基准是【打开时】冻结的 openRowId / openHeaders —— 若在保存时才取 row_id，
+            // DB 已发通知的场景下会比成"刷新后 vs 刷新后"，闸门恒过。
+            const freshData = getTableData(true);
+            const freshHeaders = (freshData && tableKey && Array.isArray(freshData[tableKey]?.content?.[0]))
+                ? freshData[tableKey].content[0] : null;
+            let identityBroken = false;
+            if (openRowId) {
+                const r = freshData && tableKey ? freshData[tableKey]?.content?.[rowIndex + 1] : null;
+                if (!Array.isArray(r) || r[0] == null || String(r[0]) !== openRowId) identityBroken = true;
+            }
+            if (!identityBroken && Array.isArray(freshHeaders)) {
+                // 任一输入框对应列的表头与打开时不一致即判定列已位移
+                for (let i = 0; i < displayRow.length; i++) {
+                    if (i === 0) continue;
+                    if (cellText(freshHeaders[i]) !== cellText(openHeaders[i])) { identityBroken = true; break; }
+                }
+            }
+            if (identityBroken) {
+                closeDialog();
+                cachedTableData = null; lastRawTableRef = null; lastTableSetFingerprint = '';
+                try { renderInterface(true); } catch (_) {}
+                if (window.toastr) window.toastr.warning('数据已更新，目标行/列已变化，已放弃本次编辑，请重新打开后修改。');
+                return;
+            }
             const currentData = getTableData();
             if (currentData && currentData[tableKey]) {
                 const currentRow = currentData[tableKey].content[rowIndex + 1];
@@ -5291,10 +5437,13 @@ const checkRowChanged = (realIdx, row) => {
                 dialog.find('textarea').each(function () {
                     const colIdx = parseInt($(this).data('col'));
                     const newVal = $(this).val();
-                    if (String(currentRow[colIdx]) !== String(newVal)) {
+                    // 用 cellText 归一：DB 空单元格是 null，String(null)==="null" 会让
+                    // 「空单元格 + 未修改」被误判为有改动并把 "" 当新值写回。
+                    if (cellText(currentRow[colIdx]) !== cellText(newVal)) {
                         hasChanges = true;
                         currentRow[colIdx] = newVal;
-                        if (headers[colIdx]) updateObj[headers[colIdx]] = newVal;
+                        // 用打开时冻结的表头，保证写入的列名与闸门校验的列名同源
+                        if (openHeaders[colIdx]) updateObj[openHeaders[colIdx]] = newVal;
                     }
                 });
                 if (hasChanges) {
@@ -5630,6 +5779,7 @@ const checkRowChanged = (realIdx, row) => {
                     lastTableDataRefreshed = true;
                     // 填表写入会增删行：按旧下标的待删/选中态失效，防止确认删除删错行
                     pendingDeletes.clear();
+                    pendingDeleteRowIds.clear();
                     selectedRows.clear();
                     renderInterface(true);
                 } else {
@@ -5728,6 +5878,7 @@ const checkRowChanged = (realIdx, row) => {
                                  isMultiSelectMode = false;
                                  selectedRows.clear();
                                  pendingDeletes.clear();
+                                 pendingDeleteRowIds.clear();
                                  if (!isEditingOrder) renderInterface(true);
                              });
                          }
