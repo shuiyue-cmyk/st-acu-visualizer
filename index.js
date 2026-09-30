@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.6.6'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.6.7'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -85,6 +85,7 @@
     };
 
     let hideOptionsUntilUpdate = false;
+    let hiddenOptionsAnchor = null;
     let lastOptionDataCheck = '';
 
     const UpdateController = {
@@ -122,9 +123,13 @@
             cachedTableData = null;
             // 外部数据变更 = 行下标可能位移：清掉按「点击时刻下标」记录的待删/选中态，
             // 否则确认删除时会按旧下标删错行（9.0 row_id 为稳定身份，前端只有下标）。
+            const hadRowIntent = pendingDeletes.size > 0 || selectedRows.size > 0;
             pendingDeletes.clear();
             selectedRows.clear();
             renderInterface(true);
+            if (hadRowIntent && window.toastr) {
+                window.toastr.info('数据已更新，待删除/选中标记已清除，请重新选择。', { timeOut: 3000 });
+            }
             if (notPersisted && window.toastr && Date.now() - lastUnpersistedToastTs > 5000) {
                 lastUnpersistedToastTs = Date.now();
                 window.toastr.warning('已刷新为运行时数据（未保存到聊天，重载页面后会消失）。', { timeOut: 4000 });
@@ -460,6 +465,19 @@
         }
     };
 
+    // 单元格编辑成功后只推进内存快照中的目标格，避免下次 diff/排序把用户刚改的行
+    // 继续当作变化行；不做全库 JSON/localStorage 写入，避免大表主线程卡顿。
+    const patchSnapshotCell = (sheetKey, dataRowIndex, colIndex, value) => {
+        try {
+            const snapshot = loadSnapshot();
+            const sheet = snapshot && snapshot[sheetKey];
+            const row = sheet && Array.isArray(sheet.content) ? sheet.content[dataRowIndex + 1] : null;
+            if (!Array.isArray(row)) return;
+            row[colIndex] = value;
+            memorySnapshot_ACU = snapshot;
+        } catch (_) {}
+    };
+
     const generateDiffMap = (currentData) => {
         const lastData = loadSnapshot();
         const diffSet = new Set();
@@ -671,7 +689,7 @@
         $('#acu-dynamic-font').remove();
         $('head').append(`
             <style id="acu-dynamic-font">
-                .acu-wrapper, .acu-edit-dialog, .acu-cell-menu, .acu-nav-container, .acu-data-card, .acu-panel-title, .acu-settings-label, .acu-checkbox-label, .acu-btn-block, .acu-nav-btn, .acu-dash-card, .acu-quick-view-card, .acu-option-panel, .acu-opt-btn, .acu-opt-header, .acu-nice-select, .acu-edit-dialog select, .acu-edit-dialog input, .acu-edit-dialog textarea, .acu-close-pill, .acu-embedded-dashboard-container, .acu-embedded-options-container {
+                .acu-wrapper, .acu-edit-dialog, .acu-cell-menu, .acu-nav-container, .acu-data-card, .acu-panel-title, .acu-settings-label, .acu-checkbox-label, .acu-btn-block, .acu-nav-btn, .acu-dash-card, .acu-quick-view-card, .acu-option-panel, .acu-opt-btn, .acu-opt-header, .acu-nice-select, .acu-edit-dialog select, .acu-edit-dialog input, .acu-edit-dialog textarea, .acu-close-pill, .acu-embedded-dashboard-container, .acu-embedded-options-container, .acu-embedded-replaced-container {
                     font-family: ${fontVal} !important;
                 }
             </style>
@@ -1577,9 +1595,20 @@
     // handleChatMutation 归位决策、设置面板「TT 适配」分区显隐。仅虚拟化开启时才提供
     // 固定/滚动双模式；未开启（含纯 ST）一律走原 frontendPosition 逻辑，不给用户选择。
     const detectTTBounded = () => {
+        let cs = null;
         try {
-            const cs = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.chatSurface);
-            if (cs && typeof cs.isManagedOwnershipRequired === 'function') return !!cs.isManagedOwnershipRequired();
+            cs = (typeof window !== 'undefined' && window.__TAURITAVERN__?.api?.chatSurface);
+        } catch (_) {}
+        if (cs && typeof cs.isManagedOwnershipRequired === 'function') {
+            try {
+                return !!cs.isManagedOwnershipRequired();
+            } catch (_) {
+                // TT 已暴露宿主 API 但状态尚未初始化时 fail-safe 到 bounded 路径，
+                // 避免误走 $chat.append 直挂导致几何漂移。
+                return true;
+            }
+        }
+        try {
             if (typeof localStorage !== 'undefined' && localStorage.getItem('chat_virtualization_enabled') === 'true') return true;
         } catch (_) {}
         return false;
@@ -1825,7 +1854,7 @@
             // 仅当 DB 完全没有精确 API（旧版）时 import 才是合法通道。
             const hasPreciseApi = !!(api && (api.updateCell || api.updateRow || api.deleteRow || api.insertRow));
             if (!saveSuccessful && preciseRejected && hasPreciseApi) {
-                if (window.toastr) window.toastr.error('保存被数据库拒绝：表格可能被锁定或正在填表，请稍后重试。');
+                // 具体提示由调用方统一展示，避免同一次拒绝在内部/外层/调用方重复弹 toast。
                 return false;
             }
             if (!saveSuccessful && !hasPreciseApi && api && api.importTableAsJson) {
@@ -1861,7 +1890,7 @@
             return true;
         } catch (e) {
             console.error("Save failed:", e);
-            if (!skipRender && window.toastr) window.toastr.error('保存失败');
+            // 单元格/整行/插入调用方各自负责回滚与用户提示，避免同一次拒绝重复弹 toast。
             return false;
         } finally {
             isSaving = false;
@@ -2931,6 +2960,13 @@ ${allTableNames.map(tName => {
                 $txt.text(info.original).data('rep-src', info.original);
             }
             $existing.find('.acu-replaced-time').text(info.at ? formatOptTime(info.at) : '');
+            // 主题/变量在原地更新时同步刷新；wrapper 缺失时保留旧主题，避免剥掉 class/变量。
+            if (themeClass) {
+                const oldThemeClasses = ($existing.attr('class') || '').match(/acu-theme-[a-zA-Z0-9_-]+/g) || [];
+                if (oldThemeClasses.length) $existing.removeClass(oldThemeClasses.join(' '));
+                $existing.addClass(themeClass);
+                $existing.attr('style', (position === 'bottom' ? 'margin-top: 6px; ' : 'margin-bottom: 6px; ') + 'width: 100%; clear: both; ' + cssVars);
+            }
             placeRepBox($target, $existing, position);
             return;
         }
@@ -3192,8 +3228,16 @@ ${allTableNames.map(tName => {
                 if (n > rowLimit) rs += sampleRow(n - 1) + ';'; // 末行补最新写入
                 return h + '@' + rs;
             }).join('~');
+            if (hideOptionsUntilUpdate && hiddenOptionsAnchor) {
+                const $currentAnchor = getEmbeddedTargetBlock();
+                if ($currentAnchor && $currentAnchor.length && $currentAnchor.get(0) !== hiddenOptionsAnchor) {
+                    hideOptionsUntilUpdate = false;
+                    hiddenOptionsAnchor = null;
+                }
+            }
             if (optionStr !== lastOptionDataCheck) {
                 hideOptionsUntilUpdate = false;
+                hiddenOptionsAnchor = null;
                 lastOptionDataCheck = optionStr;
             }
 
@@ -3627,6 +3671,15 @@ ${allTableNames.map(tName => {
             return $block.length ? $block : $el;
         }
         return null;
+    };
+
+    // 发送后隐藏选项只针对当前可见 AI 楼；新楼出现即解除，避免选项表未变化时永久消失。
+    const hideOptionsUntilAnchorChanges = () => {
+        const $anchor = getEmbeddedTargetBlock();
+        if (!$anchor || !$anchor.length) return;
+        hiddenOptionsAnchor = $anchor.get(0);
+        hideOptionsUntilUpdate = true;
+        $('.acu-embedded-options-container').hide();
     };
 
     // 正文列内容盒 = .mes_text 去掉左右 padding 后的可视文字区。
@@ -4519,10 +4572,15 @@ const checkRowChanged = (realIdx, row) => {
                     if (!api || !api.deleteRow) return;
                     const group = {};
                     for (const k of pendingDeletes) {
-                        const parts = k.split('-row-');
-                        if (parts.length === 2) {
-                            if (!group[parts[0]]) group[parts[0]] = [];
-                            group[parts[0]].push(parseInt(parts[1]));
+                        // 表名本身可能含 "-row-"；用最后一个分隔符并校验纯数字后缀解析。
+                        const sep = k.lastIndexOf('-row-');
+                        if (sep > 0) {
+                            const suffix = k.slice(sep + 5);
+                            if (/^\d+$/.test(suffix)) {
+                                const tableName = k.slice(0, sep);
+                                if (!group[tableName]) group[tableName] = [];
+                                group[tableName].push(Number(suffix));
+                            }
                         }
                     }
                     let failedRows = 0;
@@ -4828,13 +4886,11 @@ const checkRowChanged = (realIdx, row) => {
         });
 
         $('#send_but').off('click.acu_opt_hide').on('click.acu_opt_hide', function() {
-             hideOptionsUntilUpdate = true;
-             $('.acu-embedded-options-container').hide();
+             hideOptionsUntilAnchorChanges();
         });
         $('#send_textarea').off('keydown.acu_opt_hide').on('keydown.acu_opt_hide', function(e) {
              if (e.key === 'Enter' && !e.shiftKey) {
-                 hideOptionsUntilUpdate = true;
-                 $('.acu-embedded-options-container').hide();
+                 hideOptionsUntilAnchorChanges();
              }
         });
         
@@ -4855,9 +4911,7 @@ const checkRowChanged = (realIdx, row) => {
                  if (!config.clickOptionToAutoSend) ta.focus();
                  
                  if (config.clickOptionToAutoSend) {
-                     hideOptionsUntilUpdate = true;
-                     $('.acu-embedded-options-container').hide();
-                 
+                     hideOptionsUntilAnchorChanges();
 
                      const sendBtn = parentDoc.getElementById('send_but');
                      if(sendBtn) sendBtn.click();
@@ -5108,6 +5162,8 @@ const checkRowChanged = (realIdx, row) => {
                           lastTableSetFingerprint = '';
                           renderInterface(true);
                           if (window.toastr) window.toastr.error('保存失败，已回滚并刷新。');
+                      } else {
+                          patchSnapshotCell(tableKey, rowIdx, colIdx, newVal);
                       }
                 } 
             });
