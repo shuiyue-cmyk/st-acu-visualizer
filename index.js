@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.6.8'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.6.9'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -207,6 +207,10 @@
         titleColor: 'orange',
         gridColumns: (window.innerWidth <= 768 ? 4 : 0),
         showOptionPanel: false,
+        // 手动编辑表格总开关（默认关闭）。关闭时前端仅可查看：单元格点击无菜单、
+        // 整行编辑/插入行/删除行/多选删除全部不可用，前端不发起任何写库 API。
+        // 只约束前端手改，数据库自身填表/追平/正文替换等写入不受影响。
+        allowTableEdit: false,
         clickOptionToAutoSend: false,
         collapseStyle: 'bar',
         collapsePosition: 'center',
@@ -1853,7 +1857,20 @@
         } catch (_) { return ''; }
     };
 
+    // 手动编辑总闸门：设置里「允许手动编辑表格」默认关闭。关闭时前端仅可查看。
+    // 判定逻辑收敛于此，但**每个写库入口都要各自调用**（saveDataToDatabaseImpl /
+    // insertRow / 批量 deleteRow 三处直连路径 + 事件绑定层），不能只改这一处。
+    // 只拦前端手改：数据库自身填表/追平/正文替换、以及数据库自带的表格编辑器不经过这些入口。
+    const isTableEditAllowed = () => getConfig().allowTableEdit === true;
+
+    // 闸门拒绝时的统一提示（静默失败会让用户以为功能坏了）。
+    const notifyEditBlocked = () => {
+        if (window.toastr) window.toastr.warning('当前为只读模式，未开启手动编辑。如需修改表格，请到「全能设置」开启「允许手动编辑表格」。');
+    };
+
     const saveDataToDatabaseImpl = async (tableData, skipRender = false, updateContext = null) => {
+        // 最深闸门：任何写库请求在此被拦。UI 层也已各自拦截，这里是防止将来新增调用点绕过。
+        if (!isTableEditAllowed()) { notifyEditBlocked(); return false; }
         if (isSaving) return false;
         if (tableData && typeof tableData === 'object') {
             if (!tableData.mate) {
@@ -2463,6 +2480,18 @@
                                 </div>
                             </div>
 </div></div><div class="acu-section-header" data-target="sec-table-mgmt"><div class="acu-section-title"><i class="fa-solid fa-table"></i> 表格管理</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-table-mgmt"><div class="acu-settings-group">
+<div class="acu-control-row" style="border-bottom:none; padding-bottom:5px;">
+    <div class="acu-label-col">
+        <span class="acu-label-main">允许手动编辑表格 <span id="hint-edit-lock" style="font-size:11px;color:var(--acu-text-sub);font-weight:normal;margin-left:5px;display:${config.allowTableEdit ? 'none' : 'inline'}">关闭时仅可查看</span></span>
+        <span class="acu-label-sub" style="font-weight:normal">开启后可直接在面板里改单元格、整行编辑、插入行与删除行</span>
+    </div>
+    <div class="acu-input-col">
+        <label class="acu-switch">
+            <input type="checkbox" id="cfg-allow-edit" ${config.allowTableEdit ? 'checked' : ''}>
+            <span class="acu-slider-switch"></span>
+        </label>
+    </div>
+</div>
 ${allTableNames.map(tName => {
     const isHidden = hiddenTables.includes(tName);
     const isReversed = reversedTables.includes(tName);
@@ -2602,6 +2631,24 @@ ${allTableNames.map(tName => {
             renderInterface(false);
         });
         dialog.find('#cfg-grid-cols').on('change', function () { saveConfig({ gridColumns: parseInt($(this).val()) }); renderInterface(false); });
+        dialog.find('#cfg-allow-edit').on('change', function () {
+            const checked = $(this).is(':checked');
+            saveConfig({ allowTableEdit: checked });
+            dialog.find('#hint-edit-lock').toggle(checked === false);
+            // 立即重渲染：让单元格编辑菜单与多选按钮随开关出现/消失。
+            // 关闭时顺带清掉多选/待删状态，避免残留勾选让用户以为还能删。
+            if (!checked) {
+                isMultiSelectMode = false;
+                pendingDeletes.clear();
+                pendingDeleteRowIds.clear();
+                selectedRows.clear();
+                $('.acu-cell-menu, .acu-menu-backdrop').remove();
+            }
+            try { renderInterface(true); } catch (_) {}
+            if (window.toastr) {
+                window.toastr.info(checked ? '已开启手动编辑：现在可以直接修改表格。' : '已切换为只读：面板仅可查看，不能修改表格。', { timeOut: 2500 });
+            }
+        });
         
         dialog.find('#cfg-collapse-style').on('change', function() { 
             const val = $(this).val();
@@ -4185,11 +4232,11 @@ const checkRowChanged = (realIdx, row) => {
                         <button class="acu-header-btn" id="acu-btn-exit-multiselect" title="退出多选">
                             <i class="fa-solid fa-times"></i>
                         </button>
-                        ` : `
+                        ` : (isTableEditAllowed() ? `
                         <button class="acu-header-btn" id="acu-btn-multiselect" title="多选">
                             <i class="fa-solid fa-check-square"></i>
                         </button>
-                        `}
+                        ` : '')}
                         <button class="acu-header-btn" id="acu-btn-switch-style" data-table="${escapeHtml(tableName)}" title="切换视图 (当前: ${isListMode?'单列':'双列'})">
                             <i class="fa-solid ${isListMode ? 'fa-list' : 'fa-th-large'}"></i>
                         </button>
@@ -4389,7 +4436,14 @@ const checkRowChanged = (realIdx, row) => {
         });
         
         const bindDynamicContentEvents = () => {
-            $('.acu-cell').off('click').on('click', function(e) { if(isMultiSelectMode) return; e.stopPropagation(); showCellMenu(e, this); });
+            // 只读模式只替换「单元格点击」这一条：改为提示如何开启，不弹编辑菜单。
+            // 注意不可提前 return —— 下面的分页、仪表盘快速查看、仪表盘标签切换都是
+            // 纯查看交互，必须在只读模式下照常可用，否则超过每页行数的表只能看到第 1 页。
+            if (isTableEditAllowed()) {
+                $('.acu-cell').off('click').on('click', function(e) { if(isMultiSelectMode) return; e.stopPropagation(); showCellMenu(e, this); });
+            } else {
+                $('.acu-cell').off('click').on('click', function(e) { e.stopPropagation(); notifyEditBlocked(); });
+            }
              $('.acu-dash-interactive').off('click').on('click', function(e) {
                 e.stopPropagation();
                 const tableName = $(this).data('tname');
@@ -4632,6 +4686,14 @@ const checkRowChanged = (realIdx, row) => {
             $('#acu-btn-refresh, #acu-btn-refresh-emb').off('click').on('click', async (e) => {
                 e.stopPropagation();
                 if (pendingDeletes.size > 0) {
+                    // 批量删直连 DB API，需在此单独过闸门。
+                    if (!isTableEditAllowed()) {
+                        pendingDeletes.clear(); pendingDeleteRowIds.clear();
+                        isMultiSelectMode = false; selectedRows.clear();
+                        notifyEditBlocked();
+                        try { renderInterface(true); } catch (_) {}
+                        return;
+                    }
                     const api = getCore().getDB();
                     if (!api || !api.deleteRow) return;
                     const group = {};
@@ -5283,6 +5345,8 @@ const checkRowChanged = (realIdx, row) => {
         });
         menu.find('#act-insert').click(async () => {
             closeAll();
+            // insertRow 直连 DB API，不经过 saveDataToDatabaseImpl，需在此单独过闸门。
+            if (!isTableEditAllowed()) { notifyEditBlocked(); return; }
             const rawData = getTableData();
             if (rawData && rawData[tableKey]?.content) {
                 const sheet = rawData[tableKey];
