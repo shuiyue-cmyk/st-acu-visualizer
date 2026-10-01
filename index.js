@@ -1,3 +1,21 @@
+// ── 宿主 ChatSurface participant 桥（必须在 IIFE 之前声明）─────────────────
+// 宿主通过 `await import(本文件)` 取具名导出（见 manifest.json 的 hooks.chatSurface），
+// 那是**模块作用域**，拿不到 IIFE 内部的任何东西。所以由 IIFE 把自己要暴露的少数几个
+// 能力挂到这个对象上，导出函数只做转发。
+// 声明必须早于 IIFE 执行，否则导出函数所在模块在 IIFE 之前求值时会撞 TDZ。
+const __acuHostBridge = {
+    /** 由 IIFE 填充：是否启用官方 participant 接管挂载（设置项，默认关闭） */
+    isTakeoverEnabled: () => false,
+    /** 由 IIFE 填充：把主面板挂到指定消息元素上；返回是否成功 */
+    mountInto: () => false,
+    /** 由 IIIIFE 填充：面板当前所在的宿主元素（用于判断是否需要搬走） */
+    currentHost: () => null,
+    /** 由 IIFE 填充：面板内容需要重绘时调用 */
+    refresh: () => {},
+    /** 由 IIFE 填充：当前聊天里最后一条消息的宿主元素（.mes） */
+    tailElement: () => null,
+};
+
 (function () {
     'use strict';
     
@@ -256,6 +274,7 @@
         dbAccent: 'blue',
         dbGlassStyle: 'off',
         ttPanelMode: 'fixed',
+        ttUseHostParticipant: false,
         repBoxEnabled: true,
         repBoxScope: 'latest',
         repBoxPosition: 'top'
@@ -2464,6 +2483,14 @@
                                         <option value="scroll" ${config.ttPanelMode === 'scroll' ? 'selected' : ''}>滚动（随聊天）</option>
                                     </select>
                                 </div>
+                            </div><div class="acu-control-row">
+                                <div class="acu-label-col"><span class="acu-label-main">使用官方挂载接口</span><span class="acu-label-sub" style="font-weight:normal">实验项：改用宿主的 ChatSurface participant 协议挂载面板。默认关闭；开启前建议先在 TT 上验证。</span></div>
+                                <div class="acu-input-col">
+                                    <label class="acu-switch">
+                                        <input type="checkbox" id="cfg-tt-host-participant" ${config.ttUseHostParticipant === true ? 'checked' : ''}>
+                                        <span class="acu-slider"></span>
+                                    </label>
+                                </div>
                             </div></div></div>` : ''}<div class="acu-section-header" data-target="sec-actions"><div class="acu-section-title"><i class="fa-solid fa-list-check"></i> 选项面板 ${!allTableNames.some(n => n.includes('选项')) ? '<span class="acu-section-desc" style="color:#e74c3c !important;">未检测到选项表</span>' : ''}</div><i class="fa-solid fa-chevron-right acu-section-icon"></i></div><div class="acu-section-content" id="sec-actions"><div class="acu-settings-group">
 <div class="acu-control-row" >
                                 <div class="acu-label-col"><span class="acu-label-main">选项面板开关</span></div>
@@ -2610,6 +2637,7 @@ ${allTableNames.map(tName => {
         dialog.find('#cfg-layout').on('change', function() { saveConfig({ layout: $(this).val() }); renderInterface(false); });
         dialog.find('#cfg-frontend-pos').on('change', function() { saveConfig({ frontendPosition: $(this).val() }); renderInterface(false); });
         dialog.find('#cfg-tt-panel-mode').on('change', function() { saveConfig({ ttPanelMode: $(this).val() }); renderInterface(false); });
+        dialog.find('#cfg-tt-host-participant').on('change', function() { saveConfig({ ttUseHostParticipant: $(this).is(':checked') }); renderInterface(false); });
         dialog.find('#cfg-font-family').on('change', function() { saveConfig({ fontFamily: $(this).val() }); });
         
         dialog.find('#cfg-highlight-custom').on('input change', function() {
@@ -5917,10 +5945,56 @@ const checkRowChanged = (realIdx, row) => {
         dialog.on('click', function(e) { if ($(e.target).hasClass('acu-edit-overlay')) close(); });
     };
 
+    // ── 宿主 ChatSurface participant 接线（实验，默认不接管）────────────────
+    //
+    // 背景：宿主的 chat-surface 校验 `#chat` 的**直属子节点**（数量/顺序/mesid），
+    // 前端历史上因此撞过 unknown direct child fault（见 insertHtmlToPage 里的回退注释），
+    // 只能靠 MutationObserver + isManagedOwnershipRequired() 猜「消息什么时候挂上了」。
+    //
+    // 官方 participant 协议（api.chatSurface.registerParticipant）直接给 didMount 钩子，
+    // 带 { mesid, element, signal }：element 就是那条 .mes，signal 在该记录被卸载时 abort。
+    // 于是「挂到哪、什么时候搬走、什么时候销毁」都由宿主告知，不必再猜。
+    //
+    // 为什么**不**用 registerContentProcessor：那条管线把整段 .mes_text 重写成
+    // 它返回的 HTML 字符串，缓存键是 contentVersion(message)（不含本前端的状态），
+    // 且异步未就绪时会 replaceChildren() 清空 —— 与「可交互、状态多、且必须当
+    // .mes_text 兄弟节点」的面板根本不兼容。详见 CHANGELOG 的实验记录。
+    //
+    // 为什么默认关闭：接管挂载会改变一条已在 ST/TT 上验证多年的路径，
+    // 而本机没有 TT 宿主可做真机验证。开关默认 false 时本函数只注册钩子不接管，
+    // 等于纯观察，行为与改动前完全一致。
+    const wireHostChatSurfaceParticipant = () => {
+        __acuHostBridge.isTakeoverEnabled = () => getConfig().ttUseHostParticipant === true;
+        __acuHostBridge.currentHost = () => {
+            try { const w = $('.acu-wrapper').first()[0]; return w ? w.parentElement : null; } catch (_) { return null; }
+        };
+        // 面板已存在就整块搬过去（保留状态）；不存在则先走原逻辑建一个再搬。
+        // 不自己拼 HTML：面板 markup 内联在 renderInterface 里，复制一份必然与实现漂移。
+        __acuHostBridge.mountInto = (element) => {
+            try {
+                if (!element || !element.isConnected) return false;
+                const $target = $(element).find('.mes_block').first();
+                const $host = $target.length ? $target : $(element);
+                if (!$host.length) return false;
+                if (!$('.acu-wrapper').length) renderInterface(true);
+                const $wrapper = $('.acu-wrapper');
+                if (!$wrapper.length) return false;
+                if ($wrapper[0].parentElement !== $host[0]) $host.append($wrapper);
+                alignWrapperToMessageColumnNow();
+                return true;
+            } catch (_) { return false; }
+        };
+        __acuHostBridge.refresh = () => { try { alignWrapperToMessageColumnNow(); } catch (_) {} };
+        __acuHostBridge.tailElement = () => {
+            try { const m = $('#chat').find('.mes').last(); return m.length ? m[0] : null; } catch (_) { return null; }
+        };
+    };
+
     const init = () => {
         if (isInitialized) return;
         addStyles();
         applyConfigStyles(getConfig());
+        wireHostChatSurfaceParticipant();
 
         // 填表结束后前端"及时刷新"兜底：以"填表开始"信号驱动稳定轮询。
         // DB 在填表开始时调 _notifyTableFillStart；轮询每 ~2s 比较 exportTableAsJson 指纹，
@@ -6114,3 +6188,57 @@ const checkRowChanged = (realIdx, row) => {
     const { $ } = getCore();
     if ($) $(document).ready(init); else window.addEventListener('load', init);
 })();
+
+// ── 宿主 ChatSurface participant 钩子（模块级导出）─────────────────────────
+// 宿主在**首次投影之前**激活声明了 hooks.chatSurface 的扩展，然后
+// `await import(本文件)` 并调用下面这个具名导出（见宿主 extensions.js:545）。
+//
+// 三条硬约束（踩任何一条都会让宿主启动失败，故这里全程自我保护）：
+//   1. 绝不外抛。宿主用 `throwOnError: true` 调本钩子，抛错会让整个 ChatSurface 起不来。
+//   2. 幂等。宿主可能重复调用；重复注册会抛 'participant already registered'。
+//   3. 缺能力就安静退回。ST 没有 __TAURITAVERN__，老 TT 没有 chatSurface API，
+//      这两种情况直接返回，由前端既有挂载逻辑接管，行为与本改动前完全一致。
+//
+// 本文件已被两个宿主都以 `script.type = 'module'` 加载（TT asset-loader.js:161、
+// ST extensions.js:826），故加具名导出是纯增量；`await import(同一 url)` 命中浏览器
+// 模块缓存，与那个 <script> 是同一实例，不会重复执行上面的 IIFE。
+let __acuParticipantRegistered = false;
+export function acuChatSurfaceHook() {
+    try {
+        if (__acuParticipantRegistered) return;
+        const hostAbi = typeof window !== 'undefined' ? window.__TAURITAVERN__ : null;
+        const api = hostAbi && hostAbi.api ? hostAbi.api.chatSurface : null;
+        if (!api || typeof api.registerParticipant !== 'function') return;
+        // 非托管（未开虚拟化）时宿主不走 participant 模型，此时保持既有逻辑更稳
+        if (typeof api.isManagedOwnershipRequired === 'function' && !api.isManagedOwnershipRequired()) return;
+
+        api.registerParticipant({
+            id: 'st-acu-visualizer',
+            protocolVersion: 1,
+            didMount(context) {
+                try {
+                    if (!__acuHostBridge.isTakeoverEnabled()) return;   // 默认关闭 → 纯观察
+                    if (!context || !context.element) return;
+                    // 面板只有一块，挂在**末楼**；非末楼一律不接
+                    const tail = __acuHostBridge.tailElement();
+                    if (!tail || tail !== context.element) return;
+                    __acuHostBridge.mountInto(context.element);
+                    // disposable：该消息被卸载时由宿主自动调用，避免面板滞留
+                    return () => { try { __acuHostBridge.refresh(); } catch (_) {} };
+                } catch (_) { /* 绝不外抛 */ }
+            },
+            didCommitContent(context) {
+                try {
+                    if (!__acuHostBridge.isTakeoverEnabled()) return;
+                    if (!context || !context.element) return;
+                    // 宿主重写了内容 → 几何可能变了，重新对齐但不重建 DOM
+                    const host = __acuHostBridge.currentHost();
+                    if (host && context.element.contains(host)) __acuHostBridge.refresh();
+                } catch (_) { /* 绝不外抛 */ }
+            },
+        });
+        __acuParticipantRegistered = true;
+    } catch (e) {
+        console.warn('[ACU-UI] ChatSurface participant 注册失败，退回内置挂载逻辑:', e);
+    }
+}

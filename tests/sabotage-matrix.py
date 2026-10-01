@@ -100,6 +100,28 @@ INJECTIONS = [
     ('manualUpdate 退回无参调用（跳过高风险确认框）',
      'await api.manualUpdate({ confirm: true });',
      'await api.manualUpdate();', 1),
+    # ── 第四批：宿主 ChatSurface participant（实验分支）──
+    ('去掉 participant 注册的幂等守卫（重复注册会被宿主拒绝）',
+     '        if (__acuParticipantRegistered) return;', '        ', 1),
+    ('去掉托管判定（未开虚拟化时也注册 participant）',
+     "        if (typeof api.isManagedOwnershipRequired === 'function' && !api.isManagedOwnershipRequired()) return;",
+     '        ', 1),
+    ('去掉接管开关守卫（默认就接管挂载）',
+     '                    if (!__acuHostBridge.isTakeoverEnabled()) return;   // 默认关闭 → 纯观察',
+     '                    ', 1),
+    ('participant 不限制末楼（每条消息都挂面板）',
+     '                    if (!tail || tail !== context.element) return;',
+     '                    ', 1),
+    ('didMount 不返回 disposable（面板卸载后滞留）',
+     '                    return () => { try { __acuHostBridge.refresh(); } catch (_) {} };',
+     '                    return undefined;', 1),
+    ('didCommitContent 不判断面板归属（刷无关楼层）',
+     '                    if (host && context.element.contains(host)) __acuHostBridge.refresh();',
+     '                    if (host) __acuHostBridge.refresh();', 1),
+    ('participant protocolVersion 写错（宿主直接拒绝）',
+     '            protocolVersion: 1,', '            protocolVersion: 2,', 1),
+    ('participant 声明宿主不认识的字段（宿主对未知字段抛错）',
+     '            protocolVersion: 1,', '            protocolVersion: 1, bogusField: 1,', 1),
 ]
 
 

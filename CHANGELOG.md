@@ -2,6 +2,33 @@
 
 本文件记录逐版本的变更说明。前端与数据库的**适配关系**见 [README.md](README.md) 的「与数据库版本适配」。
 
+> **实验分支 `experiment/host-content-processor`（未合入 main）**：尝试改用宿主
+> TauriTavern 2.3.0 的官方挂载接口。结论与用户预期的方向相反——**要试的不是
+> `registerContentProcessor`，而是 `registerParticipant`**，理由见下。
+>
+> 宿主 chat-surface 会校验 `#chat` 的**直属子节点**（数量/顺序/mesid），前端历史上撞过
+> `unknown direct child fault`（见 `insertHtmlToPage` 的回退注释），只能靠
+> `MutationObserver` + `isManagedOwnershipRequired()` 猜「消息什么时候挂上」。
+> 2.3.0 起宿主提供两条官方通道：
+> - **`api.chatSurface.registerParticipant`**（≤2.2.0 就有，`types.d.ts:1247` 有类型声明）：
+>   `didMount/didCommitContent` 钩子给 `{ mesid, element, signal }`，`element` 就是那条 `.mes`，
+>   `signal` 在记录被卸载时 abort，返回的 disposable 由宿主自动清理 → 不用再猜。
+>   扩展需在 **manifest.json 声明 `hooks.chatSurface`**（值 = 具名导出函数名），宿主才会在
+>   **首次投影之前**激活并调用它（`extensions.js:667-685` → `install.js:190` 之前）。
+> - **`api.chatSurface.registerContentProcessor`**（2.3.0 新增）：把整段 `.mes_text` 重写成
+>   处理器返回的 HTML 字符串，缓存键是 `contentVersion(message)`（不含本前端状态），
+>   异步未就绪时 `content.replaceChildren()` 直接清空。**与可交互、状态多、且必须当
+>   `.mes_text` 兄弟节点的面板根本不兼容**，故明确不采用（已在 `host-participant` 套件里
+>   钉成断言，防止后人误加）。
+>
+> 可行性已核实：两个宿主都以 `script.type='module'` 加载扩展（TT `asset-loader.js:161`、
+> ST `extensions.js:826`），故加具名导出是纯增量；ST 不校验 manifest 未知键
+> （`getManifests` 只 fetch+parse），`hooks` 对 ST 惰性。
+>
+> 分支实现：新增 `acuChatSurfaceHook` 具名导出 + `hooks` 声明 + 设置开关
+> `ttUseHostParticipant`（**默认 false**）。默认关闭时钩子只注册不接管，行为与改动前完全一致；
+> 开启后由宿主驱动挂载。**本机无 TT 宿主，接管路径未做真机验证** —— 这是分支存在的全部理由。
+
 版本号规则：`EXT_VERSION`（`index.js:5`）与 `manifest.json` 同步；patch 位 1~10 封顶，满 10 进 minor（先例：`17.5.10 → 17.6.1`）。
 
 | 前端版本 | 适配数据库 | 变更说明 |
