@@ -100,6 +100,18 @@ INJECTIONS = [
     ('manualUpdate 退回无参调用（跳过高风险确认框）',
      'await api.manualUpdate({ confirm: true });',
      'await api.manualUpdate();', 1),
+    # ── 第五批：TT 宿主耦合（选择器边界 / bounded 检测）──
+    ('消息选择器退回后代语义（与宿主 directMessages 边界不一致）',
+     "$('#chat > .mes')", "$('#chat .mes')", 1),
+    ('归位逻辑退回 $chat.find 语义（后代选择器）',
+     "$chat.children('.mes')", "$chat.find('.mes')", 1),
+    ('删掉 detectTTBounded 的 localStorage 老宿主兜底（老宿主会直挂 #chat 而 fault）',
+     "            if (typeof localStorage !== 'undefined' && localStorage.getItem('chat_virtualization_enabled') === 'true') return true;",
+     '', 1),
+    ('detectTTBounded 的 catch 不再 fail-safe 到 bounded（未初始化时误走直挂 #chat）',
+     '                return true;', '                return false;', 1),
+    ('前端自造 class 混入宿主选择器类名 mes_text',
+     'class="acu-cell acu-grid-item"', 'class="acu-cell mes_text acu-grid-item"', 1),
 ]
 
 

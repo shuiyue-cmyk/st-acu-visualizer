@@ -36,6 +36,7 @@ python tests/sabotage-matrix.py                            # 注入矩阵：验�
 | 套件 | 守什么 | 关键手法 |
 |---|---|---|
 | `extract-self` | **抽取器自身**：花括号配平（正则字面量 / 模板串插值 / 注释里的括号）、未闭合块注释不死循环、锚点不唯一必须报错、`sliceDecl` 不吞下一条声明 | 抽取器是全套的地基：配平错一个括号就会抽错代码，而断言仍全绿 |
+| `tt-host-coupling` | **宿主契约**（TT 2.3.0）：消息选择器必须是 `#chat` 直属子 `.mes`（同 `directMessages()` 的 `:scope > .mes`）；`detectTTBounded` 三条路径；bounded 下不得直挂 `#chat`（那是宿主唯一真实 fault 入口 `unknown direct child`）；不复用宿主选择器类名（`mes_text` / `mesIDDisplay`）；`closePanel` 的 scrollTop 写回现状 | 假 DOM 证明 `:scope > .mes` 与后代选择器会分叉；`detectTTBounded` 真跑三条路径（含抛错 fail-safe） |
 | `write-identity` | 身份闸门的**锚点/基准分工**（锚点=用户所见取缓存、基准=DB 现状取活引用）；row_id/表头不符→拒；空串表头参与比对；catch 必须 fail-closed；脏数据 fail-closed；活引用不可用时回退 | 活引用与缓存克隆是**两个不同对象**；含一个「锚点也读活引用则闸门恒过」的对照组，证明测试有区分力 |
 | `row-edit-two-phase` | 整行编辑先校验后落笔：空表头列、与 DB 提交选项同名的列一律拒提交并说明；提交键用原始表头；身份闸门基准取活引用 | 假 `dialog` 提供 `find('textarea').each`；live/cache 分离 |
 | `cell-edit-guard` | 值未变则不写库/不动 DOM；`null≡''`、`0≢''`；读不到旧值时 fail-open 不吞写入；写失败回滚 | Proxy 间谍区分「读属性」与「真正调用」 |
@@ -49,7 +50,7 @@ python tests/sabotage-matrix.py                            # 注入矩阵：验�
 
 ## 注入矩阵（`sabotage-matrix.py`）
 
-**28 处真实缺陷注入，28 处全部被至少一个套件发现。** 这份矩阵是本仓测试有效性的唯一客观证据；
+**33 处真实缺陷注入，33 处全部被至少一个套件发现。** 这份矩阵是本仓测试有效性的唯一客观证据；
 改动测试或生产代码后请重跑，退出码非 0 表示「有注入无人发现」**或**「有注入锚点已失效」。
 
 <details>
@@ -91,6 +92,19 @@ python tests/sabotage-matrix.py                            # 注入矩阵：验�
 ✓ 不再跳过标题格（标题被重复渲染）                     → render-cells
 ✓ escapeHtml 去掉单引号转义（可逃逸属性）              → render-cells
 ✓ 批量删期间不再挂起通知（data_replace 冲突源）        → read-only-gates
+```
+
+</details>
+
+<details>
+<summary>展开（第五批：TT 宿主耦合）</summary>
+
+```
+✓ 消息选择器退回后代语义（与宿主 directMessages 边界不一致）   → tt-host-coupling
+✓ 归位逻辑退回 $chat.find 语义（后代选择器）                → tt-host-coupling
+✓ 删掉 detectTTBounded 的 localStorage 老宿主兜底            → tt-host-coupling
+✓ detectTTBounded 的 catch 不再 fail-safe 到 bounded         → tt-host-coupling
+✓ 前端自造 class 混入宿主选择器类名 mes_text                 → tt-host-coupling
 ```
 
 </details>

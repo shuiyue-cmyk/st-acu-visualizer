@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.7.2'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.7.3'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -1683,6 +1683,11 @@
         return isEditingOrder || !!(jq && (jq('.acu-edit-overlay, .acu-cell-menu, .acu-quick-view-overlay').length));
     };
 
+    // 消息选择器边界：宿主只认 `#chat` 的**直属子** `.mes`
+    // （chat-dom-adapter.js:7 `directMessages()` = `:scope > .mes`），
+    // 它的投影断言也按这个边界比对数量/顺序/mesid。用后代选择器（`#chat .mes`）
+    // 在出现嵌套 `.mes` 时会把面板挂进内层那个，位置就错了。
+    // 故下面所有取消息的地方一律用 children()，与宿主同边界。
     // TT 聊天 DOM 虚拟化（bounded ChatSurface）检测。三处消费：insertHtmlToPage 挂载决策、
     // handleChatMutation 归位决策、设置面板「TT 适配」分区显隐。仅虚拟化开启时才提供
     // 固定/滚动双模式；未开启（含纯 ST）一律走原 frontendPosition 逻辑，不给用户选择。
@@ -1700,6 +1705,15 @@
                 return true;
             }
         }
+        // 老宿主兜底：**故意保留**，不要当死代码删掉。
+        // 它朝「是 bounded」的方向 fail-safe：命中就按虚拟化路径走（不碰 #chat 直属），
+        // 删掉则老宿主会落到下面的 return false → 走原生直挂 #chat → 触发
+        // `Bounded ChatSurface contains an unknown direct child`。一个永不命中的兜底
+        // 换成「命中即 fault」，不划算。
+        // 2.3.0 起该设置已改存 Rust settings（chat-virtualization-state.js:12），
+        // 本仓无任何 localStorage 写入，所以这条在现代 TT 上确实不命中；
+        // 且 `__TAURITAVERN__` 由 bootstrap.js:288 装载，早于扩展加载，
+        // 因此「API 完全不在」在 TT 上不可达，在 ST 上则是正确答案（ST 从不虚拟化）。
         try {
             if (typeof localStorage !== 'undefined' && localStorage.getItem('chat_virtualization_enabled') === 'true') return true;
         } catch (_) {}
@@ -3055,7 +3069,7 @@ ${allTableNames.map(tName => {
     const collectAiMessageFloors = () => {
         const { $ } = getCore();
         const out = [];
-        const $all = $('#chat .mes');
+        const $all = $('#chat > .mes');
         if (!$all.length) return out;
         $all.each(function () {
             const el = this;
@@ -3802,7 +3816,7 @@ ${allTableNames.map(tName => {
     // 所以优先取最后一条正常消息（非系统/非小系统），没有再退回最后一条。
     const getMeasurableMes = () => {
         const { $ } = getCore();
-        const $all = $('#chat .mes');
+        const $all = $('#chat > .mes');
         if (!$all.length) return null;
         // 从末尾倒着找，命中即停 —— 不要用 .filter() 扫全部消息。
         // 原写法对每条消息调 $m.css('display')，那是 per-message getComputedStyle：
@@ -3828,7 +3842,7 @@ ${allTableNames.map(tName => {
     // 判隐藏，不再做那两个 per-node 调用。返回 .mes_block（没有则退回 .mes）。
     const getEmbeddedTargetBlock = () => {
         const { $ } = getCore();
-        const $all = $('#chat .mes');
+        const $all = $('#chat > .mes');
         if (!$all.length) return null;
         const nodes = $all.get();
         for (let i = nodes.length - 1; i >= 0; i--) {
@@ -4134,7 +4148,7 @@ ${allTableNames.map(tName => {
             }
         } else if (ttMode === 'scroll') {
             // 滚动：message/bottom 都挂末楼 mes_block（不进 #chat 直属）
-            const $lastMesS = $chat.find('.mes').last();
+            const $lastMesS = $chat.children('.mes').last();
             if ($lastMesS.length) {
                 const $tbS = $lastMesS.find('.mes_block').length ? $lastMesS.find('.mes_block') : $lastMesS;
                 $tbS.append($newContent);
@@ -4148,7 +4162,7 @@ ${allTableNames.map(tName => {
             }
             alignWrapperToMessageColumn();
         } else if (config.frontendPosition === 'message') {
-             const $lastMes = $chat.find('.mes').last();
+             const $lastMes = $chat.children('.mes').last();
              if ($lastMes.length) {
                  const $targetBlock = $lastMes.find('.mes_block').length ? $lastMes.find('.mes_block') : $lastMes;
                  $targetBlock.append($newContent);
