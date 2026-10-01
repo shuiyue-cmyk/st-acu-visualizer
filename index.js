@@ -2,7 +2,7 @@
     'use strict';
     
     const SCRIPT_ID = 'acu_visualizer_ui_v20_pagination';
-    const EXT_VERSION = '17.7.1'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
+    const EXT_VERSION = '17.7.2'; // 与 manifest.json version 同步；版本规则：patch 满10进 minor、双满10进 major
     const STORAGE_KEY_TABLE_ORDER = 'acu_table_order';
     const STORAGE_KEY_ACTION_ORDER = 'acu_action_order';
     const STORAGE_KEY_ACTIVE_TAB = 'acu_active_tab';
@@ -4969,7 +4969,16 @@ const checkRowChanged = (realIdx, row) => {
                     console.warn('[ACU-API] openSettings 失败，继续尝试 manualUpdate:', openErr);
                 }
                 try {
-                    await api.manualUpdate();
+                    // 显式传 { confirm: true }，保住旧版「手动填表必先弹确认框」的行为。
+                    // 背景：ST 库 1.0.0（龙血玄黄·数据库）给 manualUpdate 加了可选参
+                    // `options?: { confirm?: boolean }`，无参调用会被转成 skipConfirm:true
+                    // → **跳过那道高风险确认框**（框内明说会先删除所选表的 checkpoint 与增量、
+                    // 唯一基线被删则历史数据不可恢复）。DB 侧注释写明「外部 API 调用由调用方
+                    // 负责确认」，所以前端必须自己把那一步补回来。
+                    // 向后兼容：9.x 及更早的 manualUpdate() 不读实参，多传一个对象会被忽略，
+                    // 旧库上仍是原来的弹框行为，故无需做能力探测
+                    // （也不能用 `manualUpdate.length` 探测——可选参数不计入 length，两版都是 0）。
+                    await api.manualUpdate({ confirm: true });
                 } catch (err) {
                     console.error('[ACU-API] manualUpdate 调用失败:', err);
                     if (window.toastr) window.toastr.error('手动更新调用失败，请查看控制台。');

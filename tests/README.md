@@ -44,11 +44,12 @@ python tests/sabotage-matrix.py                            # 注入矩阵：验�
 | `read-only-gates` | 只读时三条写库路径（impl / `insertRow` / 批量 `deleteRow`）一条都碰不到；批量删期间 `bulkOpActive` 挂起通知；查看交互完好；DB 通知仍注册得上 | Proxy 间谍 + 循环内状态观察点；批量删分支按「`deleteRow` 之前最后一次命中」锚定 |
 | `render-cells` | DB 的 `null` 不渲染成字面量；`0`/`false` 不被吞；`cellStr` 作用域完整；>50 阈值；表头下标与标题格跳过；`<` `"` `'` `&` 四类转义 | 两处渲染语句**分档**（表卡片 vs 快速查看契约不同）；异常被捕获，不崩套件 |
 | `save-pipeline` | 精确写被拒**绝不**降级全量 import；行下标 1-based；缺 `sheet_*` 键拒存；保存串行化且失败不吞后续 | 断言「间谍记录到的调用参数」而非源码字符串 |
+| `manual-update-contract` | 手动填表**必须**显式传 `{confirm:true}`（ST 1.0.0 起无参调用会 `skipConfirm`，跳过那道「会删除 checkpoint」的高风险确认框）；恰好一处调用点；旧签名忽略多余实参 | 真跑调用表达式验证实参确实传到 DB |
 | `db-contract` | 跨仓公开 API 契约：13 方法在位、`exportTableAsJson` 返回**活引用**、null 表示、1-based 行下标、`parseMutationOptions_ACU` 从 `rowData` 读选项、DB 侧显式跳过 `isImportMode`、撞名 fail-loud | 直接读数据库源码；**每条断言打印它匹配到的文件与片段**（存在性断言光看 PASS 无意义）；给了路径却不存在 → 硬失败；语料为空 → 硬失败 |
 
 ## 注入矩阵（`sabotage-matrix.py`）
 
-**27 处真实缺陷注入，27 处全部被至少一个套件发现。** 这份矩阵是本仓测试有效性的唯一客观证据；
+**28 处真实缺陷注入，28 处全部被至少一个套件发现。** 这份矩阵是本仓测试有效性的唯一客观证据；
 改动测试或生产代码后请重跑，退出码非 0 表示「有注入无人发现」**或**「有注入锚点已失效」。
 
 <details>
@@ -90,6 +91,15 @@ python tests/sabotage-matrix.py                            # 注入矩阵：验�
 ✓ 不再跳过标题格（标题被重复渲染）                     → render-cells
 ✓ escapeHtml 去掉单引号转义（可逃逸属性）              → render-cells
 ✓ 批量删期间不再挂起通知（data_replace 冲突源）        → read-only-gates
+```
+
+</details>
+
+<details>
+<summary>展开（第三批：V17.7.2 因 ST 库 1.0.0 引入的回归）</summary>
+
+```
+✓ manualUpdate 退回无参调用（跳过高风险确认框）          → manual-update-contract
 ```
 
 </details>

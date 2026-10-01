@@ -96,6 +96,10 @@ INJECTIONS = [
     ('批量删期间不再挂起通知（data_replace 冲突源）',
      '                    bulkOpActive = true;',
      '                    bulkOpActive = false;', 1),
+    # ── 第三批：V17.7.2（ST 1.0.0）引入的回归 ──
+    ('manualUpdate 退回无参调用（跳过高风险确认框）',
+     'await api.manualUpdate({ confirm: true });',
+     'await api.manualUpdate();', 1),
 ]
 
 
